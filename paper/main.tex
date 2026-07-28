@@ -63,7 +63,7 @@ evaluation is an iterative transcendental root-find---is $26$--$55\times$
 faster than Newton's method at $2.6\cdot10^{-3}$ mean error, against the
 $\approx$10$\times$ reported originally; we also report a negative result,
 $\alpha$-entmax thresholds, where the exact solver's tiny active support
-makes it $2.5\times$ faster than any table, and distil the scoping rule
+makes it $2.6\times$ faster than any table, and distil the scoping rule
 this implies.
 \end{abstract}
 
@@ -480,8 +480,9 @@ The proof is in \ref{app:bias}.
 \emph{Hardware.} Laptop: 8-core, 16\,GB RAM, rotational HDD, Linux 6.8 ---
 the out-of-core setting where 16\,GB is the point. Server: dual AMD EPYC
 9335 (128 threads), 499\,GB RAM, enterprise NVMe, g++ 13.3 --- the
-in-RAM-scaling, parallel-build, and NVMe settings. All code, build scripts
-and raw measurement logs are available at
+in-RAM-scaling, parallel-build, and NVMe settings. All code, build scripts,
+raw measurement logs, and the script that regenerates the $\alpha$-entmax
+attention-row dataset from scratch are available at
 \url{https://github.com/tamalrkm/tapered-grid}.
 
 \subsection{Correctness}
@@ -655,7 +656,7 @@ Reported in Section~\ref{sec:apps}: Plackett--Luce memoization is
 $26$--$55\times$ faster than exact Newton at $2.6\cdot10^{-3}$ mean error
 (Table~\ref{tab:pl}), with measured bias $0.30$--$0.47\times$ the mean
 absolute error, confirming the bias lemma; $\alpha$-entmax thresholds are
-a negative result ($86$\,ns memo vs.\ $35$\,ns exact).
+a negative result ($92$\,ns memo vs.\ $35$\,ns exact).
 
 %% =======================================================================
 \section{Applications}\label{sec:apps}
@@ -705,17 +706,19 @@ logits, and accelerating it is the subject of AdaSplash
 \cite{goncalves2025}; it is evaluated per row$\times$head$\times$layer
 $\times$token, and its domain looks ideal---entries below $\tau$ have
 \emph{exactly} zero influence, so the tapered tail is exact rather than
-approximate. On $199{,}669$ real GPT-2 attention rows the memo table is
-accurate ($\tau$ error $3.9\cdot10^{-3}$ mean, bias only $0.014\times$
-that) but \textbf{loses on speed}: $86$\,ns versus $\mathbf{35}$\,\textbf{ns}
-for the exact solver.
+approximate. Our test set is $199{,}741$ pre-softmax attention rows sampled
+uniformly over (layer, head, position) from GPT-2 small run on
+WikiText-2 (raw), keeping each row's top-$32$ sorted scores; on these the
+memo table is accurate ($\tau$ error $3.8\cdot10^{-3}$ mean, bias only
+$0.005\times$ that) but \textbf{loses on speed}: $92$\,ns versus
+$\mathbf{35}$\,\textbf{ns} for the exact solver.
 
 The reason is instructive. For $\alpha{=}1.5$ the threshold has a closed
 form over the \emph{active support}, and on real attention rows that
-support is tiny---median $2$, mean $4.2$, with only $0.82\%$ of rows
+support is tiny---median $2$, mean $4.0$, with only $0.88\%$ of rows
 reaching the top-32 window. An $O(\text{support})$ closed form cannot be
 beaten by an $O(d)$ interpolation plus an $O(d)$ rank plus a memory access.
-(The memo table does beat a naive $60$-iteration bisection by $6.6\times$,
+(The memo table does beat a naive $60$-iteration bisection by $6.4\times$,
 but no one should use that.) We note this because a widely quoted
 $37.6$\,\textmu s/row figure for single-row \texttt{entmax15} reflects
 Python/tensor per-call overhead, not the intrinsic cost: the same

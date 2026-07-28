@@ -101,10 +101,10 @@ Reading:
   rate); arguments implicit by index (unrank only needed for argument-dependent
   filtering). Whole table in 3.3 min on an HDD.
 - File deleted after run (rebuild = 4 min via `./ooc_bench build 22 15`).
-- NVMe/SSD version of this experiment: reported in RESULTS_SERVER.md.
+- NVMe/SSD version of this experiment: bigbox optional task (PROMPT_BIGBOX.md T4).
 
 ## BIG-MACHINE results (2026-07-27, dual-EPYC 9335 / 128 threads / 499 GB / NVMe / H200)
-Full report: RESULTS_SERVER.md. Headlines folded into paper/main.tex.
+Full report: RESULTS_BIGBOX.md. Headlines folded into paper/main.tex.
 
 - **Parallel build via unranking** (N=1.12B–4.08B, /dev/shm, zero coordination):
   realistic `unrank` variant scales ~4.1× by T=64 then hits the DRAM-bandwidth
@@ -129,9 +129,35 @@ Full report: RESULTS_SERVER.md. Headlines folded into paper/main.tex.
   row_len, 23.3 MB, audited sound): **only 0.91% saturate top-32** → exact-tail
   property holds. Solver baselines (CPU, α=1.5): batched entmax15 0.29 µs/row BUT
   **single-row serving 37.6 µs/row (~130×)** — the latter is our fair target for
-  per-query lookup. CAVEATS: (a) dataset built on THIS REPO's docs, not WikiText
-  (datasets 5.0.0 loader bug) → regenerate on WikiText before submission; (b) npz
-  is on the big machine — **must be copied to laptop** for the memo-table benchmark.
+  per-query lookup. *(Both former caveats are now RESOLVED — see the WikiText
+  regeneration below; this bigbox dataset is superseded.)*
+
+### entmax dataset REGENERATED on WikiText-2 (2026-07-28, laptop) — caveats cleared
+
+The bigbox dataset was built on this repo's own docs because `datasets` 5.0.0
+rejected the `wikitext` repo id. Regenerated on the laptop with the canonical
+corpus; **both caveats from the bigbox run are now closed.**
+
+- Blocker was NOT the corpus (`datasets` 2.20.0 here loads `wikitext-2-raw-v1`
+  fine, 36,718 rows). It was `transformers` eagerly importing a **torchvision
+  0.21.0+cu124 built against torch 2.6** under **torch 2.11.0+cu130** →
+  `RuntimeError: operator torchvision::nms does not exist`. GPT-2 is text-only,
+  so `src_dump_entmax_rows.py` now probes torchvision and sets
+  `transformers.utils.import_utils._torchvision_available = False` when it is
+  broken. **No package was installed, upgraded, or removed.**
+- New dataset: **199,741 rows**, 98×512 = 50,176 WikiText-2 tokens, 2.77%
+  sampling over (layer,head,position), seed 0. Integrity: no NaN, desc-sorted,
+  row_len consistent; row_len min 2 / max 512 / mean 257.1.
+- Support profile essentially unchanged → **the negative result is corpus-robust**:
+  median 2, mean **4.01** (was 4.2), p99 29, **0.88% saturate top-32** (was 0.91%);
+  exact-vs-bisection θ agreement 1.0e-15.
+- Benchmark `./entmax_bench 16 12 2.0` (|U|=7.73M, 30.9 MB, 199,741 rows):
+  θ err mean **3.76e-3**, p99 2.29e-2, max 8.96e-2; **bias +1.97e-5 = 0.005×
+  mean|err|** (bias lemma again confirmed, even tighter than the docs run);
+  downstream max|Δp| mean 5.65e-3. Latency **memo 92 ns vs exact 35 ns
+  (0.4×, i.e. memo loses by 2.6×)**, bisect 583 ns (6.4×).
+- Prior docs-corpus artifacts kept for comparison: `entmax_rows_docs.npz.bak`,
+  `entmax_u_docs.bin.bak`. Full run log: `entmax_dump.log`.
 
 ## APPLICATION BENCHMARKS (2026-07-27, laptop, C++ -O3) — one WIN, one honest LOSS
 
@@ -162,19 +188,22 @@ paper's own generator** (b=5), 200k queries, K=32.
   this is what licenses the aggregate/mean use case.
 
 ### α-entmax threshold — **HONEST NEGATIVE RESULT: memo LOSES**
-Real GPT-2 rows (199,669), α=1.5, top-32 gaps.
+Real GPT-2 rows on **WikiText-2 (raw)** — 199,741 rows, α=1.5, top-32 gaps.
+*(Numbers below are the WikiText regeneration of 2026-07-28; the earlier
+docs-corpus run gave 86 ns / 3.9e-3 / 0.014× / 2.5× / 6.6× — i.e. the same
+conclusion, which is the point: the result is corpus-robust.)*
 
 | | latency | note |
 |---|---|---|
-| memo (snap+rank+read) | 86 ns | accuracy fine: θ err mean 3.9e-3, bias **0.014×** mean|err| |
-| **exact sorted-support** | **35 ns** | **2.5× FASTER than the memo table** |
-| naive bisection (60 it) | 568 ns | memo beats this 6.6×, but nobody should use it |
+| memo (snap+rank+read) | 92 ns | accuracy fine: θ err mean 3.76e-3, bias **0.005×** mean|err| |
+| **exact sorted-support** | **35 ns** | **2.6× FASTER than the memo table** |
+| naive bisection (60 it) | 583 ns | memo beats this 6.4×, but nobody should use it |
 
 **Why:** the exact α-entmax threshold is a closed form over the *active support*,
 and our own profiling of the real rows shows support is tiny — **median 2, mean
-4.2**; only 0.82% saturate top-32. An O(support≈2) closed form cannot be beaten
+4.01**; only 0.88% saturate top-32. An O(support≈2) closed form cannot be beaten
 by an O(d) interpolate + O(d) rank + memory access.
-**The 37.6 µs/row single-row figure was PyTorch per-call overhead, not intrinsic
+**The 37.6 µs/row bigbox figure was PyTorch per-call overhead, not intrinsic
 cost** — in C++ the same math is 35 ns. Lesson (worth stating in the paper):
 memoize only when exact evaluation is genuinely *iterative/transcendental*
 (Plackett–Luce: 3800 ns), not merely "a solve" (entmax: 35 ns).

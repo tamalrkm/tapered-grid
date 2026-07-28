@@ -15,6 +15,18 @@ Outputs (in this directory):
   entmax_u.bin     derived scaled gaps u_i = 0.5*(z_1 - z_i), float32, 32/row
 """
 import numpy as np, torch, math, sys
+
+# transformers imports torchvision eagerly (for image models). If the installed
+# torchvision was built against a different torch ABI it raises at import time,
+# which has nothing to do with GPT-2. Probe it, and tell transformers it is
+# absent if it is broken -- nothing in this script uses vision.
+try:
+    import torchvision  # noqa: F401
+except Exception:
+    import transformers.utils.import_utils as _iu
+    _iu._torchvision_available = False
+    print("note: torchvision unusable; disabled in transformers (not needed here)")
+
 from transformers import GPT2LMHeadModel, GPT2TokenizerFast
 
 SEED, BLOCK, TARGET_TOKENS, TARGET_ROWS, K = 0, 512, 50_176, 200_000, 32
