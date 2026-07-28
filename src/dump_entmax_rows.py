@@ -33,7 +33,8 @@ print(f"GPT-2: {NL} layers x {NH} heads, head_dim={HD}")
 # datasets versions (e.g. 5.0.0) reject the plain "wikitext" repo id.
 def wikitext_lines():
     try:
-                ds = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
+        from datasets import load_dataset
+        ds = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
         print("corpus via datasets.load_dataset")
         return (r["text"] for r in ds)
     except Exception as e:
