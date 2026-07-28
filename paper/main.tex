@@ -420,7 +420,7 @@ budget convex and the objective linear, so the Karush--Kuhn--Tucker
 conditions are sufficient and give equalized per-level error on the active
 set; this is the classical reverse water-filling / optimal bit-allocation
 solution \cite{huang1963,berger1971,gersho1992}, and we claim no novelty
-for it. Appendix~\ref{app:penalty} gives the details.
+for it. \ref{app:penalty} gives the details.
 
 \begin{theorem}[Finite-$\eps$ taper-mismatch penalty]\label{thm:penalty}
 Let $g_i=r^{\,i-1}$ and consider the geometric schedule
@@ -437,7 +437,7 @@ where $C_< = \frac{1}{\bar c\,(1-s/r)}+\frac{r}{1-r}$ for $s<r$
 (with $\bar c\in[1,1/s)$ the truncation offset) and
 $C_> = \frac{1}{1-r/s}$ for $s>r$.
 \end{theorem}
-\noindent The derivation is in Appendix~\ref{app:penalty}; numerical
+\noindent The derivation is in \ref{app:penalty}; numerical
 verification over 33 $(r,s,\eps)$ cells places \eqref{eq:penalty} within
 0.6--8\% (median $\approx$1.5\%) of the exact discrete optimum, improving
 as $\eps\to0$ in every cell, whereas the classical asymptote
@@ -473,7 +473,7 @@ first-order bias, though under the optimal taper their influence budget is
 already $O(\eps)$; and the balanced-credit interpolation of
 \cite{biswas2015} is deterministic rather than per-cell symmetric, so it is
 consistent with but not covered by the lemma.
-The proof is in Appendix~\ref{app:bias}.
+The proof is in \ref{app:bias}.
 
 %% =======================================================================
 \section{Experiments}\label{sec:experiments}
@@ -837,7 +837,7 @@ combining it with table-free indexing is straightforward future work.
 
 \section*{Acknowledgements}
 The author thanks Kenneth W. Regan, co-author of the 2015 paper on which
-this work builds. \TODO{confirm this acknowledgment wording with him.}
+this work builds.
 
 \appendix
 
