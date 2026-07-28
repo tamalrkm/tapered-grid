@@ -1,5 +1,9 @@
 %% Tapered-grid follow-up paper — Theoretical Computer Science (Elsevier)
-%% Compile: lualatex main; bibtex main; lualatex main x2
+%% Compile: pdflatex main; bibtex main; pdflatex main x2
+%% Engine: pdfLaTeX (also builds under XeLaTeX). Do NOT use LuaLaTeX --
+%% arXiv's AutoTeX does not support it. No fontspec/unicode-math is used,
+%% so pdfLaTeX is sufficient; \pdfoutput=1 forces PDF output for arXiv.
+\pdfoutput=1
 \documentclass[preprint,12pt]{elsarticle}
 
 \usepackage{amsmath,amssymb,amsthm}
