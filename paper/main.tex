@@ -1,0 +1,964 @@
+%% Tapered-grid follow-up paper — Theoretical Computer Science (Elsevier)
+%% Compile: lualatex main; bibtex main; lualatex main x2
+\documentclass[preprint,12pt]{elsarticle}
+
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{url}
+\usepackage[hidelinks]{hyperref}
+
+\journal{Theoretical Computer Science}
+
+%% ---- theorem environments ---------------------------------------------
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+
+%% ---- draft machinery ---------------------------------------------------
+\newcommand{\TODO}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+\newcommand{\PLH}[1]{\textcolor{blue}{$\langle$placeholder: #1$\rangle$}}
+
+%% ---- notation ----------------------------------------------------------
+\newcommand{\rank}{\operatorname{rank}}
+\newcommand{\unrank}{\operatorname{unrank}}
+\newcommand{\eps}{\varepsilon}
+\newcommand{\ARTIFACTREPO}{tamaltanu/tapered-grid}  %% <-- set to real repo path
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{A Table-Free Index for Tapered Memoization Grids:\\
+Compact Out-of-Core Evaluation of Functions of Sorted Arguments}
+
+\author{Tamal Maharaj}
+\ead{tamal@gm.rkmvu.ac.in}
+\address{Department of Computer Science, Ramakrishna Mission Vivekananda
+Educational and Research Institute (RKMVERI), Belur, West Bengal, India}
+
+\begin{abstract}
+Many applications must repeatedly evaluate an expensive function $f$ of a
+\emph{sorted} score vector whose influence decays with rank: Plackett--Luce
+choice probabilities, $\alpha$-entmax attention thresholds, and rank-weighted
+aggregates. Biswas and Regan (TCS~2015) introduced a tapered grid that
+memoizes such functions, indexed through precomputed node-count tables.
+We first make explicit that the tapered grid's key set is exactly the set of
+multiset combinations, so its index is the classical combinatorial number
+system: this yields a \emph{table-free} closed-form $O(d)$ rank that
+eliminates the $O(Bd)$--$O(Bd^2)$ preprocessing tables of the original
+scheme, generalizes it beyond a pinned first coordinate, and supplies the
+previously missing $O(d)$ \emph{unranking}, which enables order-free
+parallel construction and key-free storage. The resulting structure is a
+values-only flat array: at $N=37.4$M entries it occupies $5.7\times$ less
+memory than a hash-map memo and answers queries $1.3$--$1.8\times$ faster
+once both structures exceed cache, and it remains operable
+memory-mapped beyond RAM, where pointer-based alternatives cannot reside.
+We give design guidance for choosing the taper: the optimal per-level
+refinement ratio equals the influence-decay ratio, and we derive a
+finite-$\eps$ closed form for the size penalty of a mismatched
+ratio---accurate to a few percent where the classical asymptotic rate
+overstates the penalty by $16$--$43\%$. End-to-end, memoizing the Plackett--Luce normalization---whose exact
+evaluation is an iterative transcendental root-find---is $26$--$55\times$
+faster than Newton's method at $2.6\cdot10^{-3}$ mean error, against the
+$\approx$10$\times$ reported originally; we also report a negative result,
+$\alpha$-entmax thresholds, where the exact solver's tiny active support
+makes it $2.5\times$ faster than any table, and distil the scoping rule
+this implies.
+\end{abstract}
+
+\begin{keyword}
+memoization \sep combinatorial number system \sep ranking and unranking \sep
+succinct data structures \sep external memory \sep Plackett--Luce
+\end{keyword}
+
+\end{frontmatter}
+
+%% =======================================================================
+\section{Introduction}\label{sec:intro}
+
+A recurring pattern in statistical estimation and machine learning is a
+function $f$ whose argument is a \emph{sorted} vector of scores, and whose
+value depends far more on the leading entries than on the tail. Fitting a
+discrete choice model is the canonical instance: given the relative
+strengths $a_1\ge a_2\ge\dots\ge a_\ell$ of $\ell$ alternatives, recover
+the probability $p_1$ that the strongest is chosen. Under a Luce model
+\cite{luce1959,plackett1975} this means solving
+$\sum_i p_1^{1/a_i}=1$---a transcendental equation with no closed form,
+so each evaluation costs an iterative root-find. Estimation loops then
+call $f$ on tens of millions of such vectors. This is the setting
+introduced by Biswas and Regan \cite{biswas2015}, who observed that two
+structural facts make memoization unusually attractive: the argument may
+be assumed sorted (the function is symmetric, so only the ranking
+matters), and its sensitivity decays with rank, since alternatives far
+down the ordering barely affect the outcome. Their response was a
+\emph{tapered} grid: fine resolution for the leading coordinates,
+progressively coarser for later ones, with a single stored value per
+gridpoint.
+
+The same shape recurs in contemporary systems. Listwise preference losses
+used to align language models are Plackett--Luce likelihoods over ranked
+candidate lists; sparse-attention variants replace softmax with
+$\alpha$-entmax \cite{peters2019}, whose normalizing threshold is obtained
+by solving a scalar equation over sorted logits---a computation important
+enough that accelerating it is the subject of dedicated work
+\cite{goncalves2025}. In each case the argument is sorted, influence
+decays with rank, and the evaluation count is enormous.
+
+Memoizing such a function at scale is, however, a data-structure problem
+rather than a numerical one. A grid fine enough to be useful has billions
+of points, and the obvious containers are wasteful in a specific way: a
+hash map or a search tree stores, for every entry, the key \emph{as well
+as} the value, even though the keys are completely determined by the grid
+and are never in doubt. At $10^9$ entries that overhead is the difference
+between a structure that fits in memory and one that does not.
+
+This paper takes the position that the keys should not be stored at all.
+The starting observation is that the tapered grid's key set---sorted
+vectors over a fixed alphabet---is exactly the set of combinations with
+repetition, so the index the original scheme computes with precomputed
+node-count tables is the lexicographic rank in the classical
+\emph{combinatorial number system} \cite{lehmer1964,buckles1977,knuth2011}.
+Making that identification explicit has three practical consequences.
+The rank acquires a closed form evaluable in $O(d)$ arithmetic with no
+scheme-specific tables; the map becomes invertible, so an argument can be
+reconstructed from a bare integer; and the structure reduces to a flat
+array of values addressed by content. What results is a memo table that
+stores $N$ values in exactly $N$ slots, can be memory-mapped and queried
+past the limits of RAM at one disk access per query, and can be built by
+any number of threads with no coordination whatsoever.
+
+\paragraph{Contributions.}
+\begin{enumerate}
+\item \textbf{Table-free indexing (Sec.~\ref{sec:index}).} The tapered
+grid's index of \cite{biswas2015} is the lexicographic rank in the
+combinatorial number system \cite{lehmer1964,buckles1977,knuth2011}; a
+hockey-stick collapse gives a closed-form $O(d)$ rank using only a Pascal
+table, removing the $O(Bd)$ (fixed) and $O(Bd^2)$ (selective) preprocessing
+of the original scheme. The closed form also lifts a correctness
+restriction: the original Eq.~(3) indexes correctly only when the first
+coordinate is pinned to its minimum.
+\item \textbf{Unranking (Sec.~\ref{sec:index}).} An $O(d\log B)$ inverse
+reconstructs the argument from a bare index. Consequences: values-only
+(key-free) storage, order-free and embarrassingly parallel table
+construction, and $O(1)$-memory streaming enumeration. On 128 threads a
+zero-coordination build reaches the machine's memory-bandwidth ceiling,
+while the hash baseline parallelizes only $1.17\times$ (\S\ref{sec:parallel}).
+\item \textbf{An honest systems evaluation (Sec.~\ref{sec:experiments}).}
+Against hash-map baselines up to $N=1.9$B entries in RAM and $5.6$B
+out-of-core: the memory advantage of the values-only array grows without
+bound in $N$ ($5.7\times\!\to\!10.2\times$), query latency holds a
+$1.1$--$1.8\times$ edge, and at $22$\,GB on a $16$\,GB laptop the structure
+answers each query in one disk access where no key-storing structure can
+even be built.
+\item \textbf{Taper-design guidance (Sec.~\ref{sec:design}).} Under
+geometric influence decay $g_i = r^{\,i-1}$, the optimal geometric
+refinement ratio is $s=r$; ``halve the branching each level''
+\cite{biswas2015} is optimal only at $r=\tfrac12$. We derive a
+finite-$\eps$ penalty formula accurate to a few percent, whose $\eps\to0$
+limit is the classical rate-balancing penalty
+\cite{griebel2000,gopal2019,xiang2023}.
+\item \textbf{Applications, positive and negative
+(Sec.~\ref{sec:apps}).} Plackett--Luce normalization
+\cite{luce1959,plackett1975,biswas2015} is memoized $26$--$55\times$
+faster than Newton; $\alpha$-entmax thresholds \cite{goncalves2025} are
+\emph{not} worth memoizing, and the contrast yields an explicit scoping
+rule for when this class of structure pays.
+\end{enumerate}
+
+\emph{What we do not claim.} Ranking of combinations is classical
+\cite{lehmer1964,buckles1977,knuth2011,kreher1999,cover1973}; succinct
+rank-indexed arrays are standard \cite{jacobson1989,raman2002};
+dimension-robust approximation under decaying coordinate influence is the
+established weighted-space/tractability regime
+\cite{sloan1998,novak2008,gnewuch2011,cohen2011}; and rate-matching
+penalties are known as a phenomenon \cite{griebel2000,xiang2023}. Our
+contribution is the \emph{constructive combination}: an addressable,
+mmap-friendly, key-free memo structure with measured system behavior,
+plus the sharpened finite-$\eps$ penalty for this construction.
+
+%% =======================================================================
+\section{Preliminaries}\label{sec:prelim}
+
+\paragraph{The tapered grid.} Arguments are non-decreasing vectors
+$x_1\le x_2\le\dots\le x_d$ in $[0,1]$, obtained from the application's
+scores by a monotone transform that places the most influential entries
+near $0$; sequences shorter than the truncation depth $d$ are padded with
+the ceiling value $1$, whose marginal influence is nil. Coordinates are
+quantized to a common \emph{spacing vector}
+$\vec s=(s_1{=}0<s_2<\dots<s_B{=}1)$ of $B$ admissible values, spaced
+finely near $0$ and coarsely near $1$. A \emph{warped} (or
+\emph{selective}) variant additionally shrinks the admissible set with
+depth, so that deeper coordinates---which matter less---are represented
+more coarsely; we treat this in \S\ref{sec:warped}.
+
+\paragraph{The key set.} Writing $m_i\in\{1,\dots,B\}$ for the column
+index of $x_i$ in $\vec s$, monotonicity of $x$ and of $\vec s$ makes the
+stored keys exactly
+\[
+\mathcal{M}(B,d)=\{m=(m_1\le m_2\le\dots\le m_d):m_i\in\{1,\dots,B\}\},
+\qquad N=\binom{B+d-1}{d}.
+\]
+These are the \emph{combinations with repetition} of size $d$ from $B$
+symbols. The standard bijection $\phi(m)=(m_1,\,m_2{+}1,\dots,m_d{+}d{-}1)$
+maps them onto the $d$-subsets of $\{1,\dots,B{+}d{-}1\}$ and preserves
+lexicographic order, so any statement about ranking $d$-subsets transfers
+verbatim.
+
+\paragraph{Consequence for the original tables.} The scheme of
+\cite{biswas2015} computes its array index from a precomputed table
+$V_{i,b}$ counting the nodes at depth $i$ below core branch $b$. Under the
+identification above these counts are binomial coefficients,
+\[
+V_{i,b}=\binom{B-b+i-2}{\,i-2\,},
+\]
+that is, the table is Pascal's triangle in disguise; its published
+instances agree entry-by-entry (e.g.\ $V_{5,1}=\binom{19}{3}=969$,
+$V_{4,2}=\binom{17}{2}=136$). The same identity accounts for the size of
+that paper's production file: with $B{=}16$ and depth $15$, the first
+coordinate pinned to $0$ leaves $14$ free positions and
+$\binom{29}{14}=77{,}558{,}760$ keys, exactly the reported entry count.
+Recognizing the tables as binomials is what makes them removable.
+
+%% =======================================================================
+\section{Table-Free Indexing and Unranking}\label{sec:index}
+
+\subsection{Closed-form rank}
+With sentinel $m_0=1$,
+\begin{equation}\label{eq:rank}
+\rank(m)\;=\;\sum_{i=1}^{d}\left[
+\binom{B-m_{i-1}+d-i+1}{\,d-i+1\,}-\binom{B-m_{i}+d-i+1}{\,d-i+1\,}\right].
+\end{equation}
+\begin{proof}
+Count the keys preceding $m$ lexicographically, classified by the first
+position $i$ at which they differ. Such a key agrees with $m$ on
+$m_1,\dots,m_{i-1}$ and has some smaller value $v$ at position $i$;
+monotonicity forces $v\ge m_{i-1}$, so $v$ ranges over
+$[m_{i-1},\,m_i-1]$. The remaining $d-i$ positions are then free subject
+only to being non-decreasing and at least $v$, which admits
+$\binom{B-v+d-i}{\,d-i\,}$ completions. The classes over $i$ are disjoint
+and exhaust the predecessors, so
+\[
+\rank(m)=\sum_{i=1}^{d}\ \sum_{v=m_{i-1}}^{m_i-1}\binom{B-v+d-i}{\,d-i\,}.
+\]
+Each inner sum runs over consecutive entries of one diagonal of Pascal's
+triangle, so the hockey-stick identity
+$\sum_{t=lo}^{hi}\binom{t}{k}=\binom{hi+1}{k+1}-\binom{lo}{k+1}$ collapses
+it to the difference of two binomials, giving \eqref{eq:rank}.
+\end{proof}
+
+Two properties are worth noting. Only positions where $m$ strictly
+increases contribute, since $m_{i-1}=m_i$ makes the bracket vanish; and
+the only precomputation is a Pascal table of $O((B{+}d)^2)$ words, shared
+across every grid instance rather than rebuilt per scheme.
+
+\paragraph{A correctness restriction removed.} Equation~(3) of
+\cite{biswas2015} sums over $i=1,\dots,d-1$ and therefore never accounts
+for movement of the first coordinate; it indexes correctly only on that
+paper's own domain, where $x_1=0$ is pinned by construction. Our attempt
+to reproduce its published index for a key with $m_1>1$ disagrees with
+enumeration, whereas \eqref{eq:rank} indexes the full monotone domain. For
+applications that do pin the first coordinate---both of ours do---the two
+agree, and \eqref{eq:rank} specializes to the pinned case by dropping the
+$i=1$ term.
+
+\paragraph{Verification.} We checked \eqref{eq:rank} against brute-force
+lexicographic enumeration for every key of every grid with $B\le 8$,
+$d\le 6$: $6{,}426$ keys, all indices matching, with
+$\unrank(\rank(m))=m$ throughout. It reproduces the worked example of
+\cite{biswas2015} (index $328$) and, via the warped ranker of
+\S\ref{sec:warped}, that paper's selective example (index $400$).
+
+\subsection{Unranking}\label{sec:unrank}
+The map is invertible by the standard greedy decode: recover coordinates
+left to right, at each step advancing the candidate value while the block
+of completions it heads still lies below the residual index.
+
+\begin{algorithm}[h]
+\caption{$\unrank(r,B,d)$ — recover the key from its index}
+\label{alg:unrank}
+\begin{algorithmic}[1]
+\State $v\gets 1$
+\For{$i\gets 1$ \textbf{to} $d$}
+  \State $L\gets d-i$ \Comment{free positions after $i$}
+  \While{$r\ge\binom{B-v+L}{L}$}
+    \State $r\gets r-\binom{B-v+L}{L}$;\quad $v\gets v+1$
+  \EndWhile
+  \State $m_i\gets v$ \Comment{next coordinate is $\ge v$}
+\EndFor
+\State \Return $m$
+\end{algorithmic}
+\end{algorithm}
+
+Because $v$ never decreases, the loop visits each of the $B$ values at
+most once in total, giving $O(B{+}d)$ time; replacing the linear scan by
+binary search over the same monotone predicate gives $O(d\log B)$. (The
+rank direction is unconditionally $O(d)$; we state the inverse's cost
+honestly, as it is $\Theta(d)$ only when $B=O(d)$.)
+
+The original scheme provides no inverse, and its absence is what forces
+keys to be stored. With Algorithm~\ref{alg:unrank} available, three things
+follow. Storage becomes \emph{key-free}: the array holds values only, and
+any argument can be regenerated on demand. Construction becomes
+\emph{order-free}: entry $r$ can be computed from $r$ alone, so $T$
+workers may fill disjoint index ranges with no locks, no shared state and
+no communication (\S\ref{sec:parallel}). And enumeration becomes
+streaming: the whole table can be swept in $O(1)$ memory, since the
+argument of each successive slot is recoverable as it is read.
+
+\subsection{Warped and selective schemes}\label{sec:warped}
+When the scheme reduces branching with depth, the admissible set shrinks
+along a nested chain $S_1\supseteq S_2\supseteq\dots\supseteq S_d$ (a
+reduction at depth $t$ retaining every $2^{R}$-th column). The keys are
+then the non-decreasing sequences with $m_i\in S_i$. Nothing essential
+changes: let $A(i,v)$ count the completions of positions $i,\dots,d$ that
+are non-decreasing and begin at or above $v$. A single backward pass fills
+$A$ and its prefix sums in $O(dB)$ time, after which rank and unrank are
+again $O(d)$ lookups, by the same first-difference argument that proves \eqref{eq:rank} (the uniform case is $S_i\equiv\{1,\dots,B\}$,
+where $A$ is Pascal's triangle and the table disappears entirely).
+
+This replaces the recursive per-depth table of \cite[Eq.~(7)]{biswas2015},
+whose construction costs $O(Bd^2)$. We verified the nested ranker against
+exhaustive lexicographic enumeration on that paper's own selective
+configuration ($B{=}17$, $d{=}5$, reduction at depth 4; $6{,}501$ keys) and
+on $30$ randomly generated nested configurations, with rank and unrank
+agreeing everywhere. It reproduces the paper's published index $400$ for
+its worked example, which also settles a point of interpretation: the
+selective index \emph{is} the plain lexicographic rank of the nested key
+set, so no bespoke recursion is needed to compute it.
+
+\subsection{Complexity summary}
+\begin{table}[h]
+\caption{Cost of the index. The original scheme builds a node-count table
+per grid instance; ours needs only a Pascal table, which is independent of
+the spacing, the taper and the payload, and is shared across all grids.}
+\label{tab:complexity}
+\centering\small
+\begin{tabular}{lccc}
+\toprule
+& preprocessing & extra space & unrank \\
+\midrule
+fixed \cite{biswas2015} & $O(Bd)$ & $O(Bd)$ & --- \\
+selective \cite{biswas2015} & $O(Bd^{2})$ & $O(Bd)$ & --- \\
+this paper & $O((B{+}d)^{2})$ shared & $O((B{+}d)^{2})$ & $O(d\log B)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% =======================================================================
+\section{The Flat Array as a Memoization Structure}\label{sec:structure}
+
+This section states what the resulting structure is in standard terms. None
+of it is new; we include it because it explains the measurements of
+\S\ref{sec:experiments} and delimits what the construction does and does
+not buy.
+
+\paragraph{Space.} The structure is an array of $N$ payloads of $w$ bits
+plus a Pascal table of $O((B{+}d)^2)$ words that is independent of the
+payload and shared across grids. For adversarial (incompressible)
+payloads, $N\cdot w$ bits is the information-theoretic minimum: distinct
+payload assignments must produce distinct memory images, so any
+representation permitting exact recovery needs $\log_2 2^{Nw}$ bits. The
+array attains it, making the structure succinct in the usual sense
+\cite{jacobson1989,raman2002}; note that the ``zero redundancy'' applies
+to the payload, the additive table being independent of $N$.
+
+Against the baselines we measure, the separation is straightforward
+accounting: a container that stores each key explicitly---as
+\texttt{unordered\_map} over packed columns and every textbook $k$-d tree
+do---occupies at least $N(w+d\lfloor\log_2 B\rfloor)$ bits, plus pointer
+inventory. This is precisely the overhead our measurements show
+(\S\ref{sec:scaling}). It should not be overstated as a general lower
+bound, however: \emph{retrieval} structures for arbitrary static key sets
+\cite{pagh2001,dietzfelbinger2008} store a function in $(1+o(1))Nw$ bits
+with $O(1)$ probes and no keys either. What the structured key set buys
+over those is not asymptotic bits but determinism, zero construction cost,
+order preservation, and invertibility.
+
+\paragraph{The rank as a hash.} Equation~\eqref{eq:rank} is a
+\emph{minimal perfect hash} for $\mathcal{M}(B,d)$: a bijection onto
+$\{0,\dots,N-1\}$, order-preserving by construction, computable in $O(d)$
+and---unlike general minimal perfect hash functions---invertible
+(\S\ref{sec:unrank}). The $\Omega(N)$-bit description lower bounds for
+minimal perfect hashing \cite{fredman1984,mehlhorn1982} and the
+$\Theta(N\log\log\log u)$ bounds for monotone variants
+\cite{belazzougui2009,assadi2023} are not contradicted: they quantify the
+cost of identifying \emph{which} key set was given, and here the family is
+a single set determined by $(B,d)$. The operative property is that the
+lexicographic prefix-counting function of this family has a closed form;
+a cheap description alone would not suffice.
+
+\paragraph{Memory hierarchy.} In the external-memory model
+\cite{aggarwal1988,frigo1999}, with the Pascal table resident (a few
+kilobytes, comfortably L1-sized) a query performs its $O(d)$ arithmetic
+with no transfers and then exactly one block transfer for the payload;
+reconstructing the argument costs none. The algorithm uses no knowledge of
+block size, so the bound is cache-oblivious. Any comparison-based search
+over $N$ stored keys instead needs $\Omega(\log_{B_{\text{blk}}}N)$
+transfers, and a chained hash table performs at least two
+\emph{dependent} accesses---a bucket cell, then a node---with no locality
+between them. This explains the direction and bounds the magnitude of the
+latency gaps we measure, but not their exact constants: an
+open-addressing table with inline keys can achieve one access per query,
+and the observed ratios also reflect footprint, TLB pressure and allocator
+behaviour. We therefore report the latency advantage as measured rather
+than as predicted.
+
+%% =======================================================================
+\section{Choosing the Taper: Design Guidance}\label{sec:design}
+
+Influence model $|\partial f/\partial x_i|\le g_i=G\,r^{\,i-1}$; level $i$
+uses $n_i$ points; worst-case first-order error
+$\sum_i g_i/(2n_i)\le\eps$; minimize $\ln|U|=\sum_i\ln n_i$.
+
+\paragraph{Water-filling optimum.} Equalized per-level error
+$e^\ast\approx\eps/k$ over $k$ active levels; $n_i^\ast\propto g_i$;
+$k\,a=L'+\ln k+O(1)$ with $a=\ln(1/r)$, $L'=\ln\!\big(1/(2\eps)\big)$;
+$\ln|U^\ast|=\tfrac{a}{2}k^2+O(k)$. Substituting $t_i=\ln n_i$ renders the
+budget convex and the objective linear, so the Karush--Kuhn--Tucker
+conditions are sufficient and give equalized per-level error on the active
+set; this is the classical reverse water-filling / optimal bit-allocation
+solution \cite{huang1963,berger1971,gersho1992}, and we claim no novelty
+for it. Appendix~\ref{app:penalty} gives the details.
+
+\begin{theorem}[Finite-$\eps$ taper-mismatch penalty]\label{thm:penalty}
+Let $g_i=r^{\,i-1}$ and consider the geometric schedule
+$n_i=n_1 s^{\,i-1}$, truncated at $n_i\ge1$, with the minimal feasible
+$n_1$ for error budget $\eps$. With $a=\ln(1/r)$, $b=\ln(1/s)$,
+$L'=\ln\!\big(1/(2\eps)\big)$, and $k$ the active depth of the
+water-filling optimum (the fixed point $ka=L'+\ln k+O(1)$),
+\begin{equation}\label{eq:penalty}
+\frac{\ln|U_s|}{\ln|U^\ast|}
+\;=\;\underbrace{\max\!\Big(\frac{b}{a},\frac{a}{b}\Big)}_{\rho_\infty(s)}
+\cdot\left[\frac{L'+\ln C_{\lessgtr}}{L'+\ln k}\right]^{2}+\,O(1/L'),
+\end{equation}
+where $C_< = \frac{1}{\bar c\,(1-s/r)}+\frac{r}{1-r}$ for $s<r$
+(with $\bar c\in[1,1/s)$ the truncation offset) and
+$C_> = \frac{1}{1-r/s}$ for $s>r$.
+\end{theorem}
+\noindent The derivation is in Appendix~\ref{app:penalty}; numerical
+verification over 33 $(r,s,\eps)$ cells places \eqref{eq:penalty} within
+0.6--8\% (median $\approx$1.5\%) of the exact discrete optimum, improving
+as $\eps\to0$ in every cell, whereas the classical asymptote
+$\rho_\infty$ alone overstates the penalty by 16--43\%.
+The bracket is the squared ratio of effective depths: the optimum
+collects a $\ln k$ \emph{depth bonus} (its per-level error $\eps/k$
+shrinks as levels activate) that no fixed-ratio schedule matches. Hence
+$s=r$ is optimal; halving is optimal iff $r=\tfrac12$
+(e.g.\ at $r=0.75$, $\eps=10^{-8}$, halving inflates $\ln|U|$ by
+$1.88\times$ --- not the asymptotic $2.41\times$).
+Positioning: a sharpened, two-sided, finite-$\eps$ closed form, for this
+construction, of the known rate-balancing phenomenon
+\cite{griebel2000,bungartz2004,nobile2008,gopal2019,xiang2023};
+the dimension-independence of $|U|$ itself is the classical
+weighted-space regime
+\cite{sloan1998,novak2008,gnewuch2011,cohen2011,kolmogorov1959}.
+
+\paragraph{Bias.}
+For $f\in C^2$ and a $C^1$ query density, nearest-gridpoint rounding gives
+\[
+\mathbb E\!\left[f(x)-f(u)\right]
+=\sum_i \frac{\partial^2 f}{\partial x_i^2}(u)\,\frac{\delta_i^{2}}{24}
++\text{h.o.t.},
+\]
+one order smaller than the worst-case error $\sum_i g_i\delta_i/2$: averages
+over many queries converge at the second-order rate, which is what the
+aggregate applications of Section~\ref{sec:apps} rely on. This is
+high-resolution quantization folklore (Bennett lineage \cite{bennett1948})
+applied to our structure; it also corrects the empirical ``unbiasedness''
+claim of \cite{biswas2015} --- the truth is $O(\delta^2)$ bias, not zero.
+Caveats: one-sided cells (monotone boundary, truncated tail levels) retain
+first-order bias, though under the optimal taper their influence budget is
+already $O(\eps)$; and the balanced-credit interpolation of
+\cite{biswas2015} is deterministic rather than per-cell symmetric, so it is
+consistent with but not covered by the lemma.
+The proof is in Appendix~\ref{app:bias}.
+
+%% =======================================================================
+\section{Experiments}\label{sec:experiments}
+
+\emph{Hardware.} Laptop: 8-core, 16\,GB RAM, rotational HDD, Linux 6.8 ---
+the out-of-core setting where 16\,GB is the point. Server: dual AMD EPYC
+9335 (128 threads), 499\,GB RAM, enterprise NVMe, g++ 13.3 --- the
+in-RAM-scaling, parallel-build, and NVMe settings. All code, build scripts
+and raw measurement logs are available at
+\url{https://github.com/\ARTIFACTREPO}.
+
+\subsection{Correctness}
+Every index claim in this paper was checked against brute-force
+lexicographic enumeration. For the uniform scheme this is exhaustive over
+all $(B,d)$ with $B\le8$, $d\le6$ ($6{,}426$ keys), with
+$\unrank(\rank(m))=m$ throughout; for the warped scheme, exhaustive on the
+selective configuration of \cite{biswas2015} ($6{,}501$ keys) and on $30$
+random nested configurations. The closed form reproduces both worked
+examples of \cite{biswas2015} (indices $328$ and $400$) and its production
+file size, $\binom{29}{14}=77{,}558{,}760$. On a Plackett--Luce grid of
+$54{,}264$ points, the address computed by \eqref{eq:rank} agreed with a
+hash memo on every gridpoint. In the C++ experiments the tapered and hash
+implementations produced bit-identical checksums at every scale, and the
+out-of-core run verified all $5.57\cdot10^9$ stored payloads
+(\S\ref{sec:ooc}).
+
+\subsection{At-scale head-to-head (in memory)}
+\begin{table}[h]
+\caption{$B{=}16$, $d{=}13$, $N{=}37.4$M, 3M queries, g++ -O3.}
+\label{tab:headtohead}
+\centering\small
+\begin{tabular}{lccc}
+\toprule
+& query & peak RSS & build \\
+\midrule
+tapered $O(d)$ + mmap array & \textbf{127.8 ns} & \textbf{294 MB} & \textbf{2.69 s} \\
+\texttt{std::unordered\_map} & 232.3 ns & 1675 MB & 8.91 s \\
+node-count tables \cite{biswas2015} (pinned) & 106.3 ns & 294 MB & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+Two readings matter here. First, the table-free index \emph{matches} the
+original table-based index on query latency (the small residual difference
+reflects the pinned sub-range's better locality, not the method), while
+dispensing with its per-instance preprocessing and its pinned-coordinate
+restriction: the gain is in construction and generality, not in query
+speed. Second, the gap to the hash memo is structural---each hash lookup
+pays at least two dependent memory accesses plus the hashing of a
+$d$-tuple, against one access after cache-resident arithmetic. We report
+\texttt{std::unordered\_map} as the baseline an engineer would reach for
+first; an open-addressing table with inline keys would narrow the latency
+gap while leaving the footprint gap (\S\ref{sec:scaling}) intact.
+
+We deliberately do not report a spatial-index baseline. A $k$-d tree or
+similar structure answers \emph{nearest-neighbour} queries, which is a
+strictly harder problem than the one we face: because the grid is a
+product of per-coordinate spacings, the nearest gridpoint is obtained in
+closed form by rounding each coordinate independently, in $O(d)$, with no
+search. Benchmarking against a structure built for unstructured point sets
+would therefore measure the cost of generality we do not need, and at
+$d=12$--$15$ such indices degrade towards linear scan in any case. The
+relevant comparison is the one we make: against containers that answer the
+same exact-key lookup.
+
+\subsection{Scaling in $N$}\label{sec:scaling}
+Fixing the query dimension $d{=}10$ and sweeping $B$ so that only $N$
+changes (10M queries per point), the server sweep reaches $N{=}1.92$B
+($20\times$ the laptop spike):
+
+\begin{table}[h]\caption{In-RAM scaling, fixed $d{=}10$, server.}
+\label{tab:scaling}\centering\small
+\begin{tabular}{lccccc}
+\toprule
+$N$ & tapered ns & hash ns & lat.\ ratio & tapered RSS & hash RSS \\
+\midrule
+92.6M  & 98.9  & 110.8 & 1.12$\times$ & 0.74\,GB & 4.19\,GB \\
+473M   & 144.3 & 150.6 & 1.04$\times$ & 2.19\,GB & 19.5\,GB \\
+1.12B  & 149.6 & 183.4 & 1.23$\times$ & 4.66\,GB & 45.8\,GB \\
+1.92B  & 153.6 & 282.8 & 1.84$\times$ & 7.70\,GB & 78.4\,GB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The \textbf{memory ratio grows monotonically and without bound}
+($5.7\times\!\to\!10.2\times$ over this range; unbounded in principle, since
+the array carries no keys). \textbf{Query latency} tells a subtler,
+honestly-stated story: at fixed $d$ the tapered cost is a single $O(d)$
+computation plus one memory access and stays essentially flat in $N$
+($99\!\to\!154$\,ns), while the hash grows ($111\!\to\!283$\,ns) as it
+becomes DRAM-bound---so the ratio \emph{widens} with $N$ at fixed $d$
+(to $1.8\times$ here). The absolute ratio is machine-dependent
+($1.1$--$1.8\times$ across our two platforms) and noisy on this shared box
+(tapered latency showed $20$--$30\%$ run-to-run variance under a concurrent
+tenant; reported as the median of 3 runs, hash single runs). The hash never
+OOM'd on this 499\,GB box ($78$\,GB peak); the ``hash cannot exist'' regime
+is the laptop's out-of-core result (\S\ref{sec:ooc}), not this one.
+
+\subsection{Out of core: $5.57$ billion entries on a 16\,GB laptop}
+\label{sec:ooc}
+$N=\binom{36}{15}=5{,}567{,}902{,}560$ ($B{=}22$, $d{=}15$): a 22.27\,GB
+value file, $1.4\times$ total RAM, on a rotational disk (the harshest
+storage case). Build: 235\,s sequential (24\,M entries/s, disk-bound).
+A full-file scan verified \emph{every} payload (0 mismatches) at
+28\,M entries/s --- the streaming-aggregate mode, $\sim\!10^3\times$ the
+random-access rate, with arguments implicit by index. Random point
+queries (20{,}000, \texttt{mmap} + \texttt{madvise(RANDOM)}): mean
+17.0\,ms, p50 15.5\,ms, p90 25.1\,ms; 89.8\% of queries went to disk with
+mean 18.9\,ms --- \emph{the signature of exactly one seek per query}; the
+$O(d)$ index arithmetic contributes nothing measurable, and there is
+never a second dependent access. For contrast, the hash memo's measured
+43.5\,B/entry footprint would require $\approx$242\,GB of RAM at this $N$
+($15\times$ the machine); an on-disk chained layout would pay
+$\ge2$ dependent seeks per query on a $4.5\times$ larger file (hence a
+$\sim4.5\times$ smaller cached fraction). In this regime the values-only
+array is not merely faster --- it is the only structure of the three that
+exists.
+
+On the server's enterprise NVMe (same query protocol, $N{=}1.12$B,
+$4.48$\,GB file, pages evicted via \texttt{posix\_fadvise(DONTNEED)}), a
+cold random query costs \textbf{p50 67\,\textmu s, mean 71\,\textmu s};
+an immediate warm re-run collapses to $\approx$1\,\textmu s
+($\approx$70$\times$), confirming the cold pages were genuinely
+disk-resident. Against the HDD's 15.5\,ms p50 this is a
+$\mathbf{\approx\!230\times}$ media speedup for the identical
+one-access-per-query structure. Combining with
+\S\ref{sec:parallel}--\S\ref{sec:scaling} yields a clean three-tier
+first-touch latency hierarchy at $N\!\sim\!10^9$: resident array
+$\approx$100--280\,ns; page-cache-resident file, fresh \texttt{mmap}
+(minor fault only) $\approx$1\,\textmu s; evicted, genuine NVMe read
+$\approx$67--85\,\textmu s. Each tier is exactly one access; the taper's
+$O(d)$ arithmetic is never the bottleneck.
+
+\subsection{Parallel construction via unranking}\label{sec:parallel}
+On a 128-thread dual-EPYC server we fill tables of
+$N=\binom{41}{10}\!\approx\!1.12$B and $\binom{46}{10}\!\approx\!4.08$B
+entries; worker $j$ owns the index range $[jN/T,(j{+}1)N/T)$ with
+\emph{zero coordination}---no locks, no shared state---because $\unrank$
+recovers each entry's argument from its index alone. Two variants: a
+trivial-payload \texttt{flat} fill, and \texttt{unrank}, which actually
+reconstructs the column vector per entry (the realistic case). Every build
+was verified on $10^6$ random indices (0 errors across all 32 runs).
+
+\begin{table}[h]\caption{Zero-coordination parallel build,
+$N{=}1.12$B ($B{=}32,d{=}10$), \texttt{/dev/shm}. \texttt{unrank} is the
+argument-reconstructing variant.}\label{tab:parallel}
+\centering\small
+\begin{tabular}{lcccc}
+\toprule
+$T$ & \texttt{flat} entries/s & \texttt{unrank} entries/s & \texttt{unrank} speedup \\
+\midrule
+1  & 1.20e9 & 2.31e8 & 1.00$\times$ \\
+4  & 1.02e9 & 6.25e8 & 2.70$\times$ \\
+16 & 9.17e8 & 8.86e8 & 3.83$\times$ \\
+64 & 9.55e8 & 9.59e8 & 4.15$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The \texttt{flat} fill is already memory-bandwidth-bound at a single thread
+($\approx$5\,GB/s of sequential stores), so extra threads barely help; the
+realistic \texttt{unrank} variant is compute-bound at low $T$ and scales to
+$\approx$4.1$\times$ by $T{=}64$, at which point it \emph{converges onto the
+same $\approx$9.5e8 entries/s ceiling as \texttt{flat}}---i.e.\ enough
+threads fully hide the $O(d)$ reconstruction behind the bandwidth wall. The
+honest ceiling on this two-socket box is DRAM bandwidth, not thread count.
+Peak RSS was $3.8$ bytes/entry (the 4-byte payload; \emph{no} per-entry key
+overhead).
+
+\emph{Versus the hash.} A single \texttt{std::unordered\_map} builds the same
+$N{=}1.12$B content in $234$\,s using $43.1$\,GB; the fair parallel hash
+(16 shard-maps, 16 threads, per-shard mutex) manages only $200$\,s---a
+$1.17\times$ speedup, lock and node-allocation contention dominating. The
+flat array builds in $0.9$--$4.9$\,s: a $\mathbf{183}$--$\mathbf{250\times}$
+build-time advantage and a $\mathbf{10.2\times}$ memory advantage
+($4.2$\,GB vs $43.1$\,GB), the memory gap wider than the $5.7\times$ seen at
+laptop scale as the hash's fixed per-entry overhead grows with $N$.
+
+\subsection{End-to-end applications}
+Reported in Section~\ref{sec:apps}: Plackett--Luce memoization is
+$26$--$55\times$ faster than exact Newton at $2.6\cdot10^{-3}$ mean error
+(Table~\ref{tab:pl}), with measured bias $0.30$--$0.47\times$ the mean
+absolute error, confirming the bias lemma; $\alpha$-entmax thresholds are
+a negative result ($86$\,ns memo vs.\ $35$\,ns exact).
+
+%% =======================================================================
+\section{Applications}\label{sec:apps}
+
+\subsection{Plackett--Luce normalization: where memoization wins}
+\label{sec:app-pl}
+The canonical $f$ of \cite{biswas2015}: given a sorted $x$ with $x_1{=}0$,
+return $p_1$ solving $\sum_i p_1^{1/(1-x_i)}=1$ --- the top-choice
+probability of a Luce/Plackett model \cite{luce1959,plackett1975}. No
+closed form exists, so every exact evaluation is an iterative root-find
+whose each iteration costs $\ell$ transcendental \texttt{pow} calls. We
+draw $2\cdot10^5$ queries from the generator of \cite[\S5]{biswas2015}
+($b{=}5$, $\ell{=}32$) and compare, in C++ at \texttt{-O3}, single-query.
+
+\begin{table}[h]\caption{Plackett--Luce memoization
+($\gamma{=}2$ taper). Speedups are over Newton / bisection.}
+\label{tab:pl}\centering\small
+\begin{tabular}{lccccc}
+\toprule
+grid & table & mean err & bias/mean & memo & speedup \\
+\midrule
+$B{=}12,d{=}8$   & 0.1\,MB & 1.30e-2 & 0.99 & 70\,ns  & $\mathbf{55\times}$ / 406$\times$ \\
+$B{=}16,d{=}12$  & 31\,MB  & 3.04e-3 & 0.34 & 117\,ns & $\mathbf{33\times}$ / 244$\times$ \\
+$B{=}20,d{=}12$  & 218\,MB & 2.64e-3 & 0.47 & 145\,ns & $\mathbf{26\times}$ / 199$\times$ \\
+$B{=}16,d{=}16$  & 620\,MB & 2.65e-3 & 0.30 & 149\,ns & $\mathbf{25\times}$ / 189$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Exact evaluation costs $3.8$\,\textmu s (Newton) or $28$\,\textmu s
+(bisection) per query; the memo table answers in $70$--$149$\,ns, a
+$26$--$55\times$ speedup over Newton and up to $406\times$ over
+bisection---against the $\approx$10$\times$ reported in \cite{biswas2015}.
+Accuracy saturates near $2.6\cdot10^{-3}$ mean absolute error (the
+interpolation floor for nearest-grid rounding; \cite{biswas2015}'s
+credit-weighted variant reaches $\approx$$10^{-3}$). Crucially the
+\textbf{measured bias is $0.30$--$0.47\times$ the mean absolute error}
+(and an order smaller still for the smoother $f$ of
+\S\ref{sec:app-entmax}), the empirical counterpart of the bias lemma and
+what licenses the aggregate use case.
+
+\subsection{$\alpha$-entmax thresholds: where it does \emph{not}}
+\label{sec:app-entmax}
+It is equally important to report where the structure loses.
+$\alpha$-entmax \cite{peters2019} computes a threshold $\tau$ over sorted
+logits, and accelerating it is the subject of AdaSplash
+\cite{goncalves2025}; it is evaluated per row$\times$head$\times$layer
+$\times$token, and its domain looks ideal---entries below $\tau$ have
+\emph{exactly} zero influence, so the tapered tail is exact rather than
+approximate. On $199{,}669$ real GPT-2 attention rows the memo table is
+accurate ($\tau$ error $3.9\cdot10^{-3}$ mean, bias only $0.014\times$
+that) but \textbf{loses on speed}: $86$\,ns versus $\mathbf{35}$\,\textbf{ns}
+for the exact solver.
+
+The reason is instructive. For $\alpha{=}1.5$ the threshold has a closed
+form over the \emph{active support}, and on real attention rows that
+support is tiny---median $2$, mean $4.2$, with only $0.82\%$ of rows
+reaching the top-32 window. An $O(\text{support})$ closed form cannot be
+beaten by an $O(d)$ interpolation plus an $O(d)$ rank plus a memory access.
+(The memo table does beat a naive $60$-iteration bisection by $6.6\times$,
+but no one should use that.) We note this because a widely quoted
+$37.6$\,\textmu s/row figure for single-row \texttt{entmax15} reflects
+Python/tensor per-call overhead, not the intrinsic cost: the same
+mathematics in C++ is $35$\,ns.
+
+\paragraph{Scoping rule.} Memoize when exact evaluation is genuinely
+\emph{iterative and transcendental} (Plackett--Luce: $3.8$\,\textmu s), not
+merely ``a solve'' (entmax: $35$\,ns). Sortedness, rank-decaying influence,
+and an exact tail are necessary but \emph{not sufficient}; the exact
+baseline must itself be expensive.
+
+%% =======================================================================
+\section{Related Work}\label{sec:related}
+
+\paragraph{Ranking combinatorial objects.} Assigning consecutive integers
+to combinatorial objects in lexicographic order originates with Lehmer's
+combinatorial number system \cite{lehmer1964} and was made algorithmic by
+Buckles and Lybanon \cite{buckles1977}; Knuth \cite[\S7.2.1.3]{knuth2011}
+and Kreher and Stinson \cite{kreher1999} give the modern treatment,
+including combinations with repetition via the stars-and-bars bijection,
+and Genitrini and P\'epin \cite{genitrini2021} revisit unranking. In its
+general form the principle is Cover's enumerative source coding
+\cite{cover1973}: an index is the count of admissible continuations. Our
+contribution is not this machinery but its identification with, and
+consequences for, the tapered memoization grid---which removes that
+scheme's tables, extends it to variable per-depth alphabets, and supplies
+the inverse it lacked.
+
+\paragraph{Succinct structures and perfect hashing.} Storing data at the
+information-theoretic minimum with fast access is the subject of succinct
+and implicit data structures \cite{jacobson1989,raman2002}; rank-indexed
+blocks are the device inside \textsc{rrr}-style encodings. For arbitrary
+static key sets, retrieval structures achieve $(1+o(1))Nw$ bits without
+storing keys \cite{pagh2001,dietzfelbinger2008}, at the price of
+randomized construction and no order or inverse. Minimal perfect hashing
+carries $\Omega(N)$-bit description lower bounds
+\cite{fredman1984,mehlhorn1982}, with tight bounds known for monotone
+variants \cite{belazzougui2009,assadi2023} and $\Theta(N\log N)$ for
+arbitrary prescribed orders \cite{fox1991}. Our key set escapes these
+because it is one parameterized family, not an arbitrary subset.
+
+\paragraph{Grids for functions with decaying coordinate importance.}
+Sparse grids \cite{bungartz2004} and their dimension-adaptive
+\cite{gerstner2003} and anisotropic \cite{nobile2008,nobile2016} variants
+allocate resolution per dimension according to importance, and
+Griebel and Knapek \cite{griebel2000} determine optimal approximation
+spaces from a ratio of smoothness exponents---together with a penalty for
+choosing that ratio wrongly, which is the closest antecedent of our
+Theorem~\ref{thm:penalty} (theirs is one-sided and additive in the order,
+on a sparse grid; ours is two-sided, multiplicative on $\log$-cost, at
+finite $\eps$, for a full tapered tensor grid). That grid size can be made
+independent of the ambient dimension under summable coordinate importance
+is the classical weighted-space and tractability theory
+\cite{sloan1998,novak2008,gnewuch2011}, with matching $N$-term results for
+anisotropic analytic classes \cite{cohen2011} and the $\log^2(1/\eps)$
+entropy regime going back to Kolmogorov and Tikhomirov
+\cite{kolmogorov1959}. We exploit this regime rather than extend it; note
+also that symmetry alone does not deliver dimension-independence
+\cite{weimar2014}---the decay does.
+
+\paragraph{Balancing competing geometric rates.} The phenomenon behind
+Theorem~\ref{thm:penalty}---that a geometric schedule must match a
+geometric target rate, with graceful but real degradation otherwise---is
+classical. It is the optimal bit-allocation/reverse water-filling result
+of transform coding \cite{huang1963,berger1971,gersho1992}, and it appears
+sharply in rational approximation, where the achievable exponent is the
+minimum of two competing rates and is maximized when they coincide
+\cite{gopal2019,xiang2023}; exponential-sum \cite{braess2005} and
+$hp$-refinement analyses have the same structure. Our contribution is a
+closed form at finite $\eps$ for this construction, not the effect.
+
+\paragraph{Approximating softmax-family transforms.} $\alpha$-entmax
+\cite{peters2019} and its sparse-attention descendants
+\cite{goncalves2025} motivate our second application; adaptive truncation
+schemes for decoding \cite{nguyen2024} share the sorted-logit domain.
+Lookup-table approximation of softmax is well established in inference
+hardware, but for scalar transforms rather than the vector-argument,
+monotone, tapered setting considered here. Our finding for this family is
+negative and, we think, useful: when the exact solver is itself
+$O(\text{support})$, tabulation does not pay.
+
+%% =======================================================================
+\section{Conclusion}\label{sec:conclusion}
+Recognizing the tapered memoization grid of \cite{biswas2015} as an
+instance of the combinatorial number system turns its index into a
+closed-form $O(d)$ computation, removes its preprocessing tables, extends
+it to variable per-depth alphabets, and---most consequentially---supplies
+the inverse it lacked. With unranking available the keys need never be
+stored, and the memo table becomes a flat array of values addressed by
+content. The practical effects are what we set out to measure: a footprint
+a factor $5.7$--$10.2\times$ below a hash memo, widening with $N$; a table
+built by 128 threads without a single lock, at the machine's
+memory-bandwidth limit, while a sharded hash manages $1.17\times$; and, at
+$22$\,GB on a $16$\,GB laptop, a structure answering each query in exactly
+one disk access where no key-storing container can be constructed at all.
+
+The applications delimit the claim rather than merely supporting it.
+Memoizing the Plackett--Luce normalization---an iterative transcendental
+solve---is $26$--$55\times$ faster than Newton's method, beyond the
+$\approx$$10\times$ originally reported. Memoizing the $\alpha$-entmax
+threshold is \emph{slower} than solving it exactly, because its active
+support is tiny. The lesson we would keep is that a sorted argument with
+rank-decaying influence and an exact tail is not sufficient reason to
+tabulate: the exact evaluation must itself be expensive.
+
+Several directions remain. A GPU-resident variant would need the index
+arithmetic mapped onto warp-level primitives and a batched interpolation
+kernel. The taper schedule is geometric by assumption here; learning a
+non-geometric schedule from an empirical influence profile, guided by
+Theorem~\ref{thm:penalty}, may recover part of the accuracy floor we
+observe. Hybrids with retrieval structures could extend key-free storage
+to grids whose admissible set is not a clean lattice. Finally, that
+accuracy floor comes from nearest-grid rounding; the credit-weighted
+interpolation of \cite{biswas2015} reaches roughly $10^{-3}$, and
+combining it with table-free indexing is straightforward future work.
+
+%% =======================================================================
+
+\section*{Acknowledgements}
+The author thanks Kenneth W. Regan, co-author of the 2015 paper on which
+this work builds. \TODO{confirm this acknowledgment wording with him.}
+
+\appendix
+
+%% =======================================================================
+\section{Derivation of Theorem~\ref{thm:penalty}}\label{app:penalty}
+
+\subsection{The water-filling optimum and its depth bonus}
+Minimize $\sum_i \ln n_i$ subject to $\sum_i g_i/(2n_i)\le\eps$,
+$n_i\ge1$. Substituting $t_i=\ln n_i$ makes the constraint convex in $t$
+and the objective linear, so KKT conditions are necessary and sufficient:
+on the active set, per-level errors equalize, $g_i/(2n_i)=e^\ast$; this
+is the classical reverse water-filling / bit-allocation optimum
+\cite{huang1963,berger1971,gersho1992}. With $g_i=r^{\,i-1}$, level $i$
+is active iff $g_i>2e^\ast$, giving an active prefix of length $k$
+satisfying $r^{k-1}>2e^\ast\ge r^{k}$. Inactive levels contribute the
+tail $\sum_{i>k}g_i/2=r^{k}/(2(1-r))$, so
+$e^\ast=\big(\eps-\tfrac{r^{k}}{2(1-r)}\big)/k=\tfrac{\eps}{k}(1+O(1/k))$,
+and the activation boundary gives
+\begin{equation}\label{eq:kfix}
+k\,a \;=\; \ln\frac{1}{2e^\ast} + O(1)\;=\;L' + \ln k + O(1),
+\end{equation}
+the \emph{depth bonus}: because $e^\ast=\eps/k$ decreases as levels
+activate, the optimum runs $\ln k$ deeper (in budget units) than a
+naive $\eps$-per-level account suggests. Summing,
+\[
+\ln|U^\ast|=\sum_{i\le k}\Big[\ln\tfrac{1}{2e^\ast}-(i-1)a\Big]
+= k\ln\tfrac{1}{2e^\ast}-a\tfrac{k(k-1)}{2}
+= \tfrac{a}{2}k^{2}+O(k).
+\]
+
+\subsection{Geometric schedule, $s<r$ (refining too fast)}
+Per-level errors $\frac{1}{2n_1}(r/s)^{i-1}$ \emph{increase} toward the
+truncation depth $m$ (where $n_m=\bar c\in[1,1/s)$), so the total is
+dominated by the last active level plus the tail:
+$\big(\tfrac{r^{m-1}}{2}\big)\,C_< \,(1+o(1))$ with
+$C_<=\frac{1}{\bar c(1-s/r)}+\frac{r}{1-r}$. Feasibility pins
+$r^{m-1}=2\eps/C_<$, i.e.
+\begin{equation}\label{eq:mfix-lt}
+m\,a = L' + \ln C_< + O(1).
+\end{equation}
+With $\ln n_1=(m-1)b+\ln\bar c$,
+$\ln|U_s|=\sum_{i\le m}\big[\ln n_1-(i-1)b\big]
+=\tfrac{b}{2}m^{2}+O(m)$.
+
+\subsection{Geometric schedule, $s>r$ (refining too slowly)}
+The error series converges from the first term:
+$\sum_i \frac{1}{2n_1}(r/s)^{i-1}=\frac{1}{2n_1}\cdot\frac{1}{1-r/s}
+\,(1+o(1))$, so $n_1=C_>/(2\eps)$ with $C_>=\frac{1}{1-r/s}$, i.e.\
+$\ln n_1=L'+\ln C_>$, and the truncation depth is $m=1+\ln n_1/b$. The
+tail is negligible since $am=(a/b)(L'+\ln C_>)>L'$. Again
+$\ln|U_s|=\tfrac{b}{2}m^{2}+O(m)$.
+
+\subsection{Combining}
+\[
+\frac{\ln|U_s|}{\ln|U^\ast|}
+=\frac{\tfrac{b}{2}m^{2}+O(m)}{\tfrac{a}{2}k^{2}+O(k)}
+=\frac{b}{a}\cdot\Big(\frac{m}{k}\Big)^{2}\big(1+O(1/L')\big),
+\]
+and substituting \eqref{eq:kfix} and \eqref{eq:mfix-lt} (resp.\ the
+$s>r$ analogue, where $\frac{b}{a}(\frac{m}{k})^2$ produces the
+$\frac{a}{b}$ branch) yields \eqref{eq:penalty}. As $\eps\to0$ the
+bracket tends to $1$ like $\big(1-\frac{\ln k-\ln C}{L'}\big)^{2}$ ---
+logarithmically slowly, which is why the asymptote $\rho_\infty$
+overstates the penalty at any practical~$\eps$. \hfill$\square$
+
+\subsection{Numerical verification}
+We evaluated \eqref{eq:penalty} against the exact discrete optimum
+(computed by numerical water-filling) over $33$ cells:
+$r\in\{0.25,0.5,0.75\}$, $s\in\{0.25,\dots,0.9\}$,
+$\eps\in\{10^{-6},10^{-8},10^{-10}\}$. Representative values at
+$\eps=10^{-8}$:
+
+\begin{table}[h]\caption{Predicted versus exact penalty. $\rho_\infty$ is
+the classical asymptote alone.}\label{tab:penaltyverify}
+\centering\small
+\begin{tabular}{lcccc}
+\toprule
+$(r,s)$ & exact & \eqref{eq:penalty} & error & $\rho_\infty$ error \\
+\midrule
+$(0.75,0.50)$ \emph{halving} & 1.878 & 1.858 & $-1.0\%$ & $+28\%$ \\
+$(0.75,0.90)$ & 2.110 & 2.136 & $+1.2\%$ & $+29\%$ \\
+$(0.50,0.25)$ & 1.578 & 1.554 & $-1.5\%$ & $+27\%$ \\
+$(0.50,0.75)$ & 1.866 & 1.910 & $+2.3\%$ & $+29\%$ \\
+$(0.25,0.50)$ \emph{halving} & 1.569 & 1.628 & $+3.8\%$ & $+27\%$ \\
+$(0.25,0.75)$ & 3.585 & 3.801 & $+6.0\%$ & $+34\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Across all $33$ cells the closed form is within $0.6$--$8.2\%$ (median
+$\approx1.5\%$) and improves monotonically as $\eps$ decreases in every
+cell, confirming the two-term form; the asymptote alone is off by $+16\%$
+to $+43\%$. The residual is the dropped $O(m)$ terms and is largest where
+the active depth $k$ is small, i.e.\ for fast decay.
+
+%% =======================================================================
+\section{Proof of the bias lemma}\label{app:bias}
+Taylor-expand within the cell of gridpoint $u$:
+$f(x)-f(u)=\nabla f(u)\!\cdot\!(x-u)+\tfrac12 (x-u)^{\!\top}H(\xi)(x-u)$
+with $\xi$ on the segment. Under an exactly per-cell-uniform query
+measure, $\mathbb E[x_i-u_i]=0$ annihilates the first-order term, and
+independence across coordinates within the cell gives
+$\mathbb E[(x_i-u_i)(x_j-u_j)]=\delta_{ij}\,\delta_i^{2}/12$, so
+\[
+\mathbb E[f(x)-f(u)]
+=\sum_i \frac{\partial^2 f}{\partial x_i^2}(u)\,\frac{\delta_i^{2}}{24}
++o\!\Big(\sum_i\delta_i^{2}\Big).
+\]
+For a general $C^{1}$ query density $\rho$, the within-cell mean offset
+is $\mathbb E[x_i-u_i]=O\big(\delta_i^{2}\,\partial_i\ln\rho\big)$, so
+the first-order term also contributes at second order, changing only
+the constant. One-sided cells --- the monotone boundary and truncated
+tail levels ($n_i=1$, rounding to the padded ceiling) --- retain
+first-order bias; under the optimal taper those levels have
+$g_i\le 2\eps/k$, so their contribution stays within the error budget
+but not at the $\delta^{2}$ rate. This is high-resolution quantization
+analysis in the Bennett lineage \cite{bennett1948} applied to the
+tapered grid; no novelty is claimed for the technique.
+\hfill$\square$
+
+\bibliographystyle{elsarticle-num}
+\bibliography{refs}
+
+\end{document}

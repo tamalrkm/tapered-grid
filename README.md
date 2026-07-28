@@ -1,0 +1,93 @@
+# Tapered Grid — table-free indexing for memoization grids
+
+Research artifact for *A Table-Free Index for Tapered Memoization Grids:
+Compact Out-of-Core Evaluation of Functions of Sorted Arguments*.
+
+This is a follow-up to Biswas & Regan, *Approximation of function evaluation
+over sequence arguments via specialized data structures*, Theoretical Computer
+Science **607** (2015) 113–123.
+
+## What this is
+
+A memoization table for functions `f(x)` of a **sorted** argument whose
+influence decays with rank. Its keys — non-decreasing vectors over a fixed
+alphabet — are exactly the combinations with repetition, so the array index is
+the lexicographic rank in the **combinatorial number system**. That gives:
+
+* a **table-free closed-form `O(d)` rank** (no per-grid preprocessing tables),
+* an **`O(d)` unrank**, so keys need never be stored and the table can be built
+  by any number of threads with zero coordination,
+* a **values-only flat array**: smaller than a hash memo by a factor that grows
+  with `N`, memory-mappable, and usable past the limits of RAM at one disk
+  access per query.
+
+## Quick start
+
+```bash
+make                      # builds all C++ benchmarks (g++ -O3 -march=native)
+python3 src/refimpl.py    # exhaustive correctness: rank/unrank vs brute force
+python3 src/warped.py     # warped/selective ranker; reproduces published index 400
+```
+
+`src/refimpl.py` is the readable reference implementation; the C++ files are the
+measured ones. Everything is self-contained apart from the α-entmax dataset
+(see below); Python needs only `numpy` (plus `scipy` for `src/spike_bench.py`).
+
+## Reproducing the paper's claims
+
+| Claim | Command |
+|---|---|
+| Correctness of the closed-form rank/unrank (6,426 keys, all `B≤8, d≤6`); reproduces published index **328** and file size **C(29,14)=77,558,760** | `python3 src/refimpl.py` |
+| Warped/selective ranker; reproduces published index **400** (6,501 keys + 30 random nested configs) | `python3 src/warped.py` |
+| In-RAM head-to-head and `N`-sweeps vs `std::unordered_map` | `./bench tapered 16 13 3000000 42` and `./bench hash 16 13 3000000 42` |
+| Base scheme's table-based index (pinned) for comparison | `./bench tabled 16 13 3000000 42` |
+| **Out-of-core**: 5.57e9 entries / 22.3 GB file, one seek per query | `./ooc_bench build 22 15 && ./ooc_bench scan 22 15 && ./ooc_bench query 22 15 20000 42` |
+| Taper-mismatch penalty, Theorem 1 (33 cells, 0.6–8% vs exact) | `python3 src/verify_penalty.py` |
+| Optimal-schedule check (`s=r`; halving optimal iff `r=½`) | `python3 src/verify_schedule.py` |
+| **Plackett–Luce application** (memo 26–55× faster than Newton) | `./pl_bench 16 12 2.0` |
+| **α-entmax application** (negative result: memo *loses* to the exact solver) | `./entmax_bench 16 12 2.0` — needs the dataset, below |
+
+Measured outputs from the runs reported in the paper are in `RESULTS.md`
+(laptop: 8-core, 16 GB, rotational HDD) and `RESULTS_SERVER.md` (server: dual
+EPYC 9335 / 128 threads, 499 GB, NVMe, H200). `THEORY_PENALTY.md` contains the
+derivation and numerical verification behind Theorem 1 and the bias lemma.
+
+### Notes on two experiments
+
+**Out-of-core** writes a 22.3 GB file (`ooc_memo.bin`) to the working directory
+and takes ≈4 min to build plus ≈3 min to verify on a rotational disk. Delete it
+afterwards. Choose `B`/`d` so that `4·C(B+d-1,d)` comfortably exceeds your RAM —
+the point of the experiment is that the file does not fit.
+
+**α-entmax** needs `entmax_u.bin`: the scaled sorted logit gaps
+`u_i = ½(z₁ − z_i)` of real attention rows, as `float32`, 32 per row, row-major.
+The rows used in the paper are 199,669 sampled `(layer, head, position)` rows
+from GPT-2 small; the dataset is not redistributed here (regenerate it by
+hooking each layer's QKV projection, recomputing `q·kᵀ/√d_head`, applying the
+causal mask, and keeping the top-32 sorted scores per row). `src/entmax_analyze.py`
+profiles support sizes and cross-checks the exact solver against bisection.
+
+## Layout
+
+```
+src/refimpl.py         reference rank/unrank + exhaustive tests
+src/warped.py          nested-alphabet (warped/selective) ranker + verification
+src/verify_schedule.py optimal taper ratio, numerically
+src/verify_penalty.py  Theorem 1 vs the exact discrete optimum
+src/entmax_analyze.py  α-entmax solver check + support-size profiling
+src/bench.cpp          in-RAM: tapered / base-table / hash
+src/ooc_bench.cpp      out-of-core: build / scan-verify / random queries
+src/pl_bench.cpp       Plackett–Luce application benchmark
+src/entmax_bench.cpp   α-entmax application benchmark
+src/spike_bench.py     early Python size/latency spike (superseded by the C++)
+paper/                 LaTeX source
+```
+
+## Citing
+
+The paper is under submission; please cite the 2015 TCS paper it builds on until
+then.
+
+## License
+
+MIT — see `LICENSE`.

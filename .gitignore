@@ -1,0 +1,17 @@
+# build products
+bench
+ooc_bench
+pl_bench
+entmax_bench
+*.o
+# large generated data (regenerate; see README)
+*.bin
+*.npz
+# latex aux
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg
+paper/*.pdf
+__pycache__/
