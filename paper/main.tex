@@ -91,7 +91,11 @@ the probability $p_1$ that the strongest is chosen. Under a Luce model
 $\sum_i p_1^{1/a_i}=1$---a transcendental equation with no closed form,
 so each evaluation costs an iterative root-find. Estimation loops then
 call $f$ on tens of millions of such vectors. This is the setting
-introduced by Biswas and Regan \cite{biswas2015}, who observed that two
+introduced by Biswas and Regan \cite{biswas2015},\footnote{The present
+author is the first author of \cite{biswas2015}, published under the name
+Tamal T.\ Biswas. That work is discussed in the third person throughout
+for readability; where the present paper corrects or sharpens its claims,
+the criticism is self-directed.} who observed that two
 structural facts make memoization unusually attractive: the argument may
 be assumed sorted (the function is symmetric, so only the ranking
 matters), and its sensitivity decays with rank, since alternatives far
@@ -842,8 +846,8 @@ combining it with table-free indexing is straightforward future work.
 %% =======================================================================
 
 \section*{Acknowledgements}
-The author thanks Kenneth W. Regan, co-author of the 2015 paper on which
-this work builds.
+The author thanks Kenneth W. Regan, his co-author on the 2015 paper on
+which this work builds.
 
 \appendix
 
