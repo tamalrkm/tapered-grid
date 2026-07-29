@@ -44,7 +44,7 @@ measured ones. Everything is self-contained apart from the α-entmax dataset
 | **Out-of-core**: 5.57e9 entries / 22.3 GB file, one seek per query | `./ooc_bench build 22 15 && ./ooc_bench scan 22 15 && ./ooc_bench query 22 15 20000 42` |
 | Taper-mismatch penalty, Theorem 1 (33 cells, 0.6–8% vs exact) | `python3 src/verify_penalty.py` |
 | Optimal-schedule check (`s=r`; halving optimal iff `r=½`) | `python3 src/verify_schedule.py` |
-| **Plackett–Luce application** (memo 26–55× faster than Newton) | `./pl_bench 16 12 2.0` |
+| **Plackett–Luce application** (memo 25–55× faster than Newton) | `./pl_bench 16 12 2.0` |
 | **α-entmax application** (negative result: memo *loses* to the exact solver) | `python3 src/dump_entmax_rows.py` then `./entmax_bench 16 12 2.0` |
 
 Measured outputs from the runs reported in the paper are in `RESULTS.md`

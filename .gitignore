@@ -13,5 +13,9 @@ paper/*.log
 paper/*.out
 paper/*.bbl
 paper/*.blg
+# ...except the bbl: arXiv's AutoTeX does not run bibtex, so the submitted
+# source must carry it. Keeping it here makes paper/ a complete, buildable
+# arXiv package (pdflatex x2, no .bib needed).
+!paper/main.bbl
 paper/*.pdf
 __pycache__/

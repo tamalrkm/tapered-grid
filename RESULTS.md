@@ -180,12 +180,14 @@ paper's own generator** (b=5), 200k queries, K=32.
 | B=20,d=12 | 218 MB | 2.64e-3 | 9.4e-3 | 1.9e-2 | 0.47 | 145 ns | 3811 ns | 28899 ns | **26×** / 199× |
 | B=16,d=16 | 620 MB | 2.65e-3 | 9.1e-3 | 1.9e-2 | 0.30 | 149 ns | 3780 ns | 28286 ns | **25×** / 189× |
 
-- **26–55× over Newton, 189–406× over bisection** — and note the 2015 paper
+- **25–55× over Newton, 189–406× over bisection** — and note the 2015 paper
   claimed only "~10× faster"; the table-free index does substantially better.
 - Accuracy saturates at ≈2.6e-3 mean (interpolation/truncation floor, nearest-
   grid = the paper's "NN" strategy; their credit-weighted scheme reached ~1e-3).
-- **Bias is 0.30–0.47× the mean error** → the bias lemma confirmed empirically;
-  this is what licenses the aggregate/mean use case.
+- **Bias is 0.30–0.47× the mean error on the three finer grids** (the coarsest,
+  B=12/d=8, is 0.99× — the O(δ²) bias term stops being small when δ is large,
+  exactly as the lemma predicts) → bias lemma confirmed empirically; this is
+  what licenses the aggregate/mean use case.
 
 ### α-entmax threshold — **HONEST NEGATIVE RESULT: memo LOSES**
 Real GPT-2 rows on **WikiText-2 (raw)** — 199,741 rows, α=1.5, top-32 gaps.

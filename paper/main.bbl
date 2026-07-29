@@ -1,0 +1,183 @@
+\begin{thebibliography}{10}
+\expandafter\ifx\csname url\endcsname\relax
+  \def\url#1{\texttt{#1}}\fi
+\expandafter\ifx\csname urlprefix\endcsname\relax\def\urlprefix{URL }\fi
+\expandafter\ifx\csname href\endcsname\relax
+  \def\href#1#2{#2} \def\path#1{#1}\fi
+
+\bibitem{luce1959}
+R.~D. Luce, Individual Choice Behavior: A Theoretical Analysis, Wiley, 1959.
+
+\bibitem{plackett1975}
+R.~L. Plackett, The analysis of permutations, Journal of the Royal Statistical
+  Society, Series C 24~(2) (1975) 193--202.
+
+\bibitem{biswas2015}
+T.~T. Biswas, K.~W. Regan, Approximation of function evaluation over sequence
+  arguments via specialized data structures, Theoretical Computer Science 607
+  (2015) 113--123.
+
+\bibitem{peters2019}
+B.~Peters, V.~Niculae, A.~F.~T. Martins, Sparse sequence-to-sequence models,
+  in: Proc. ACL, 2019, pp. 1504--1519.
+
+\bibitem{goncalves2025}
+N.~Gon{\c c}alves, M.~Treviso, A.~F.~T. Martins, {AdaSplash}: Adaptive sparse
+  flash attention, in: Proc. ICML, 2025, arXiv:2502.12082.
+
+\bibitem{lehmer1964}
+D.~H. Lehmer, The machine tools of combinatorics, in: E.~F. Beckenbach (Ed.),
+  Applied Combinatorial Mathematics, Wiley, 1964, pp. 5--31.
+
+\bibitem{buckles1977}
+B.~P. Buckles, M.~Lybanon, Algorithm 515: Generation of a vector from the
+  lexicographical index, ACM Transactions on Mathematical Software 3~(2) (1977)
+  180--182.
+
+\bibitem{knuth2011}
+D.~E. Knuth, The Art of Computer Programming, Volume 4A: Combinatorial
+  Algorithms, Addison-Wesley, 2011, \S7.2.1.3.
+
+\bibitem{griebel2000}
+M.~Griebel, S.~Knapek, Optimized tensor-product approximation spaces,
+  Constructive Approximation 16~(4) (2000) 525--540.
+
+\bibitem{gopal2019}
+A.~Gopal, L.~N. Trefethen, Solving {L}aplace problems with corner singularities
+  via rational functions, SIAM Journal on Numerical Analysis 57~(5) (2019)
+  2074--2094.
+
+\bibitem{xiang2023}
+S.~Xiang, S.~Yang, Y.~Wu, On the best convergence rates of lightning plus
+  polynomial approximations, arXiv:2312.16116 (2023).
+
+\bibitem{kreher1999}
+D.~L. Kreher, D.~R. Stinson, Combinatorial Algorithms: Generation, Enumeration,
+  and Search, CRC Press, 1999.
+
+\bibitem{cover1973}
+T.~M. Cover, Enumerative source encoding, IEEE Transactions on Information
+  Theory 19~(1) (1973) 73--77.
+
+\bibitem{jacobson1989}
+G.~Jacobson, Space-efficient static trees and graphs, in: Proc. FOCS, 1989, pp.
+  549--554.
+
+\bibitem{raman2002}
+R.~Raman, V.~Raman, S.~S. Rao, Succinct indexable dictionaries with
+  applications to encoding $k$-ary trees and multisets, in: Proc. SODA, 2002,
+  pp. 233--242.
+
+\bibitem{sloan1998}
+I.~H. Sloan, H.~Wo{\'z}niakowski, When are quasi-{M}onte {C}arlo algorithms
+  efficient for high dimensional integrals?, Journal of Complexity 14~(1)
+  (1998) 1--33.
+
+\bibitem{novak2008}
+E.~Novak, H.~Wo{\'z}niakowski, Tractability of Multivariate Problems, Volumes
+  I--III, European Mathematical Society, 2008--2012.
+
+\bibitem{gnewuch2011}
+M.~Gnewuch, H.~Wo{\'z}niakowski, Quasi-polynomial tractability, Journal of
+  Complexity 27~(3--4) (2011) 312--330.
+
+\bibitem{cohen2011}
+A.~Cohen, R.~DeVore, C.~Schwab, Analytic regularity and polynomial
+  approximation of parametric and stochastic elliptic {PDE}s, Analysis and
+  Applications 9~(1) (2011) 11--47.
+
+\bibitem{pagh2001}
+R.~Pagh, Low redundancy in static dictionaries with constant query time, SIAM
+  Journal on Computing 31~(2) (2001) 353--363.
+
+\bibitem{dietzfelbinger2008}
+M.~Dietzfelbinger, R.~Pagh, Succinct data structures for retrieval and
+  approximate membership, in: Proc. ICALP, 2008, pp. 385--396.
+
+\bibitem{fredman1984}
+M.~L. Fredman, J.~Koml{\'o}s, On the size of separating systems and families of
+  perfect hash functions, SIAM Journal on Algebraic and Discrete Methods 5~(1)
+  (1984) 61--68.
+
+\bibitem{mehlhorn1982}
+K.~Mehlhorn, On the program size of perfect and universal hash functions, in:
+  Proc. FOCS, 1982, pp. 170--175.
+
+\bibitem{belazzougui2009}
+D.~Belazzougui, P.~Boldi, R.~Pagh, S.~Vigna, Monotone minimal perfect hashing:
+  searching a sorted table with {$O(1)$} accesses, in: Proc. SODA, 2009, pp.
+  785--794.
+
+\bibitem{assadi2023}
+S.~Assadi, M.~Farach-Colton, W.~Kuszmaul, Tight bounds for monotone minimal
+  perfect hashing, in: Proc. SODA, 2023, pp. 456--476.
+
+\bibitem{aggarwal1988}
+A.~Aggarwal, J.~S. Vitter, The input/output complexity of sorting and related
+  problems, Communications of the ACM 31~(9) (1988) 1116--1127.
+
+\bibitem{frigo1999}
+M.~Frigo, C.~E. Leiserson, H.~Prokop, S.~Ramachandran, Cache-oblivious
+  algorithms, in: Proc. FOCS, 1999, pp. 285--297.
+
+\bibitem{huang1963}
+J.~J.~Y. Huang, P.~M. Schultheiss, Block quantization of correlated {G}aussian
+  random variables, IEEE Transactions on Communications Systems 11~(3) (1963)
+  289--296.
+
+\bibitem{berger1971}
+T.~Berger, Rate Distortion Theory: A Mathematical Basis for Data Compression,
+  Prentice-Hall, 1971.
+
+\bibitem{gersho1992}
+A.~Gersho, R.~M. Gray, Vector Quantization and Signal Compression, Kluwer,
+  1992.
+
+\bibitem{bungartz2004}
+H.-J. Bungartz, M.~Griebel, Sparse grids, Acta Numerica 13 (2004) 147--269.
+
+\bibitem{nobile2008}
+F.~Nobile, R.~Tempone, C.~G. Webster, An anisotropic sparse grid stochastic
+  collocation method for partial differential equations with random input data,
+  SIAM Journal on Numerical Analysis 46~(5) (2008) 2411--2442.
+
+\bibitem{kolmogorov1959}
+A.~N. Kolmogorov, V.~M. Tikhomirov, $\varepsilon$-entropy and
+  $\varepsilon$-capacity of sets in functional spaces, Uspekhi Matematicheskikh
+  Nauk 14~(2) (1959) 3--86.
+
+\bibitem{bennett1948}
+W.~R. Bennett, Spectra of quantized signals, Bell System Technical Journal
+  27~(3) (1948) 446--472.
+
+\bibitem{genitrini2021}
+A.~Genitrini, M.~P{\'e}pin, Lexicographic unranking of combinations revisited,
+  Algorithms 14~(3) (2021) 97.
+
+\bibitem{fox1991}
+E.~A. Fox, Q.~F. Chen, A.~M. Daoud, L.~S. Heath, Order-preserving minimal
+  perfect hash functions and information retrieval, ACM Transactions on
+  Information Systems 9~(3) (1991) 281--308.
+
+\bibitem{gerstner2003}
+T.~Gerstner, M.~Griebel, Dimension-adaptive tensor-product quadrature,
+  Computing 71~(1) (2003) 65--87.
+
+\bibitem{nobile2016}
+F.~Nobile, L.~Tamellini, R.~Tempone, Convergence of quasi-optimal sparse-grid
+  approximation of {H}ilbert-space-valued functions, Numerische Mathematik 134
+  (2016) 343--388.
+
+\bibitem{weimar2014}
+M.~Weimar, On lower bounds for integration of multivariate
+  permutation-invariant functions, Journal of Complexity 30~(1) (2014) 87--97.
+
+\bibitem{braess2005}
+D.~Braess, W.~Hackbusch, Approximation of $1/x$ by exponential sums in
+  $[1,\infty)$, IMA Journal of Numerical Analysis 25~(4) (2005) 685--697.
+
+\bibitem{nguyen2025}
+M.~Nguyen, et~al., Turning up the heat: Min-p sampling for creative and
+  coherent {LLM} outputs, in: Proc. ICLR, 2025, arXiv:2407.01082.
+
+\end{thebibliography}
