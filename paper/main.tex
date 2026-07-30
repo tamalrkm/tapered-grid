@@ -298,7 +298,7 @@ The map is invertible by the standard greedy decode: recover coordinates
 left to right, at each step advancing the candidate value while the block
 of completions it heads still lies below the residual index.
 
-\begin{algorithm}[h]
+\begin{algorithm}[ht]
 \caption{$\unrank(r,B,d)$---recover the key from its index}
 \label{alg:unrank}
 \begin{algorithmic}[1]
@@ -355,7 +355,7 @@ set, so no bespoke recursion is needed to compute it.
 \subsection{Complexity summary}
 Table~\ref{tab:complexity} collects the costs of the two schemes.
 
-\begin{table}[h]
+\begin{table}[ht]
 \caption{Cost of the index. The original scheme builds a node-count table
 per grid instance; ours needs only a Pascal table, which is independent of
 the spacing, the taper and the payload, and is shared across all grids.}
@@ -536,7 +536,7 @@ out-of-core run verified all $5.57\cdot10^9$ stored payloads
 (\S\ref{sec:ooc}).
 
 \subsection{At-scale head-to-head (in memory)}
-\begin{table}[h]
+\begin{table}[ht]
 \caption{$B{=}16$, $d{=}13$, $N{=}37.4$M, 3M queries, g++ -O3.}
 \label{tab:headtohead}
 \centering\small
@@ -579,7 +579,7 @@ changes (10M queries per point), the server sweep reaches $N{=}1.92$B
 ($51\times$ the largest in-RAM configuration of
 Table~\ref{tab:headtohead}), as reported in Table~\ref{tab:scaling}:
 
-\begin{table}[h]\caption{In-RAM scaling, fixed $d{=}10$, server.}
+\begin{table}[ht]\caption{In-RAM scaling, fixed $d{=}10$, server.}
 \label{tab:scaling}\centering\small
 \begin{tabular}{lccccc}
 \toprule
@@ -652,7 +652,7 @@ trivial-payload \texttt{flat} fill, and \texttt{unrank}, which actually
 reconstructs the column vector per entry (the realistic case). Every build
 was verified on $10^6$ random indices (0 errors across all 32 runs).
 
-\begin{table}[h]\caption{Zero-coordination parallel build,
+\begin{table}[ht]\caption{Zero-coordination parallel build,
 $N{=}1.12$B ($B{=}32,d{=}10$), \texttt{/dev/shm}. \texttt{unrank} is the
 argument-reconstructing variant.}\label{tab:parallel}
 \centering\small
@@ -713,7 +713,7 @@ whose each iteration costs $\ell$ transcendental \texttt{pow} calls. We
 draw $2\cdot10^5$ queries from the generator of \cite[\S5]{biswas2015}
 ($b{=}5$, $\ell{=}32$) and compare, in C++ at \texttt{-O3}, single-query.
 
-\begin{table}[h]\caption{Plackett--Luce memoization
+\begin{table}[ht]\caption{Plackett--Luce memoization
 ($\gamma{=}2$ taper). Speedups are over Newton / bisection.}
 \label{tab:pl}\centering\small
 \begin{tabular}{lccccc}
@@ -956,7 +956,7 @@ $r\in\{0.25,0.5,0.75\}$, $s\in\{0.25,\dots,0.9\}$,
 $\eps\in\{10^{-6},10^{-8},10^{-10}\}$. Representative values at
 $\eps=10^{-8}$ are given in Table~\ref{tab:penaltyverify}.
 
-\begin{table}[h]\caption{Predicted versus exact penalty. $\rho_\infty$ is
+\begin{table}[ht]\caption{Predicted versus exact penalty. $\rho_\infty$ is
 the classical asymptote alone.}\label{tab:penaltyverify}
 \centering\small
 \begin{tabular}{lcccc}
