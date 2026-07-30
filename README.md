@@ -97,8 +97,16 @@ paper/                 LaTeX source
 
 ## Citing
 
-The paper is under submission; please cite the 2015 TCS paper it builds on until
-then.
+This artifact is archived on Zenodo with a DOI:
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21675851.svg)](https://doi.org/10.5281/zenodo.21675851)
+
+`10.5281/zenodo.21675851` is the concept DOI and always resolves to the latest
+release; `10.5281/zenodo.21675852` pins v1.0.0, the snapshot behind the numbers
+reported in the paper.
+
+The paper itself is under submission; until it appears, please cite this
+artifact and the 2015 TCS paper it builds on.
 
 ## License
 
