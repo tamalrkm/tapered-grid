@@ -1,4 +1,11 @@
-%% Tapered-grid follow-up paper — Theoretical Computer Science (Elsevier)
+%% Tapered-grid follow-up paper — Algorithmica (Springer)
+%% Venue history: TCS desk-rejected 2026-07 ("too experimental"); auto-transfer
+%% to Information and Computation withdrawn (I&C is more theoretical still).
+%% Algorithmica scope explicitly covers experimental papers judged on
+%% "algorithm behavior on data from applications".
+%% Still typeset in elsarticle: Springer's template is RECOMMENDED, not
+%% required, and accepted articles are reformatted by their production team.
+%% Convert to sn-jnl only if asked at revision.
 %% Compile: pdflatex main; bibtex main; pdflatex main x2
 %% Engine: pdfLaTeX (also builds under XeLaTeX). Do NOT use LuaLaTeX --
 %% arXiv's AutoTeX does not support it. No fontspec/unicode-math is used,
@@ -21,7 +28,7 @@
 %% errors out on bitmap PK fonts); protrusion alone does the work here.
 \usepackage[protrusion=true,expansion=false]{microtype}
 
-\journal{Theoretical Computer Science}
+\journal{Algorithmica}
 
 %% ---- theorem environments ---------------------------------------------
 \newtheorem{theorem}{Theorem}
@@ -995,6 +1002,38 @@ but not at the $\delta^{2}$ rate. This is high-resolution quantization
 analysis in the Bennett lineage \cite{bennett1948} applied to the
 tapered grid; no novelty is claimed for the technique.
 \hfill$\square$
+
+%% =======================================================================
+%% Springer requires a Declarations section; Elsevier collected these through
+%% portal fields instead. The generative-AI paragraph is mandatory under both
+%% publishers' policies and must sit before the reference list. VERIFY the AI
+%% wording describes your own process -- it is the author's declaration, not
+%% a template to accept unread.
+\section*{Declarations}
+
+\noindent\textbf{Funding.} This research received no specific grant from any
+funding agency in the public, commercial, or not-for-profit sectors.
+
+\medskip\noindent\textbf{Competing interests.} The author declares no
+competing financial or non-financial interests. The author is not, and has
+not been, an editor or editorial board member of this journal.
+
+\medskip\noindent\textbf{Data availability.} All code, build scripts, raw
+measurement logs, and the script that regenerates the $\alpha$-entmax
+attention-row dataset are publicly available at
+\url{https://github.com/tamalrkm/tapered-grid} under the MIT licence.
+
+\medskip\noindent\textbf{Use of generative AI and AI-assisted technologies.}
+During the preparation of this work the author used Claude (Anthropic),
+accessed through the Claude Code interface, to draft and revise manuscript
+text, to implement the benchmark and analysis programs released with the
+artifact, and to execute the experiments reported in
+Sections~\ref{sec:experiments} and~\ref{sec:apps}. After using this tool the
+author reviewed and edited the content as needed and takes full
+responsibility for the content of the publication. All correctness claims
+reported here are additionally machine-verified against brute-force
+enumeration, and all measurement code and raw logs are publicly available
+(Section~\ref{sec:experiments}).
 
 \bibliographystyle{elsarticle-num}
 \bibliography{refs}
