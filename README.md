@@ -1,7 +1,7 @@
 # Tapered Grid — table-free indexing for memoization grids
 
-Research artifact for *A Table-Free Index for Tapered Memoization Grids:
-Compact Out-of-Core Evaluation of Functions of Sorted Arguments*.
+Research artifact for *Memoization Without Keys: Compact, Out-of-Core Tables
+for Functions of Sorted Arguments*.
 
 This is a follow-up to Biswas & Regan, *Approximation of function evaluation
 over sequence arguments via specialized data structures*, Theoretical Computer
@@ -48,9 +48,10 @@ measured ones. Everything is self-contained apart from the α-entmax dataset
 | **α-entmax application** (negative result: memo *loses* to the exact solver) | `python3 src/dump_entmax_rows.py` then `./entmax_bench 16 12 2.0` |
 
 Measured outputs from the runs reported in the paper are in `RESULTS.md`
-(laptop: 8-core, 16 GB, rotational HDD) and `RESULTS_SERVER.md` (server: dual
-EPYC 9335 / 128 threads, 499 GB, NVMe, H200). `THEORY_PENALTY.md` contains the
-derivation and numerical verification behind Theorem 1 and the bias lemma.
+(desktop: Xeon E3-1245 v6, 4 cores / 8 threads, 16 GB, 1 TB 7200 rpm SATA HDD)
+and `RESULTS_SERVER.md` (server: dual EPYC 9335 / 128 threads, 499 GB, NVMe,
+H200). `THEORY_PENALTY.md` contains the derivation and numerical verification
+behind Theorem 1 and the bias lemma.
 
 ### Notes on two experiments
 

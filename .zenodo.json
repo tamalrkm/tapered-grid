@@ -1,7 +1,7 @@
 {
   "title": "Tapered grid: reference implementation, benchmark code, and raw measurement logs",
   "upload_type": "software",
-  "description": "<p>Research artifact for <em>A Table-Free Index for Tapered Memoization Grids: Compact Out-of-Core Evaluation of Functions of Sorted Arguments</em>.</p><p>A memoization table for functions of a sorted argument whose influence decays with rank. Its keys are the combinations with repetition, so the array index is the lexicographic rank in the combinatorial number system. This gives a table-free closed-form O(d) rank, an O(d) unrank (so keys need never be stored and the table can be built by any number of threads with zero coordination), and a values-only flat array that is memory-mappable and usable past the limits of RAM at one disk access per query.</p><p>Contains the reference implementation, the warped/selective ranker, the C++ benchmarks (in-RAM, out-of-core, Plackett-Luce, alpha-entmax), the dataset regeneration script, and the raw measurement logs for every experiment reported in the paper.</p><p>Follow-up to Biswas &amp; Regan, <em>Approximation of function evaluation over sequence arguments via specialized data structures</em>, Theoretical Computer Science 607 (2015) 113-123.</p>",
+  "description": "<p>Research artifact for <em>Memoization Without Keys: Compact, Out-of-Core Tables for Functions of Sorted Arguments</em>.</p><p>A memoization table for functions of a sorted argument whose influence decays with rank. Its keys are the combinations with repetition, so the array index is the lexicographic rank in the combinatorial number system. This gives a table-free closed-form O(d) rank, an O(d) unrank (so keys need never be stored and the table can be built by any number of threads with zero coordination), and a values-only flat array that is memory-mappable and usable past the limits of RAM at one disk access per query.</p><p>Contains the reference implementation, the warped/selective ranker, the C++ benchmarks (in-RAM, out-of-core, Plackett-Luce, alpha-entmax), the dataset regeneration script, and the raw measurement logs for every experiment reported in the paper.</p><p>Follow-up to Biswas &amp; Regan, <em>Approximation of function evaluation over sequence arguments via specialized data structures</em>, Theoretical Computer Science 607 (2015) 113-123.</p>",
   "creators": [
     {
       "name": "Maharaj, Tamal",
@@ -17,6 +17,8 @@
     "succinct data structures",
     "external memory",
     "Plackett-Luce",
+    "algorithm engineering",
+    "memory-mapped I/O",
     "experimental algorithmics"
   ],
   "related_identifiers": [

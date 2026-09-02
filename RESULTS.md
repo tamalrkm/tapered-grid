@@ -2,7 +2,7 @@
 
 ## Go/no-go gate (PASSED) — at-scale C++ head-to-head
 
-`bench.cpp`, g++ -O3 -march=native, this machine (16 GB, 8 cores).
+`bench.cpp`, g++ -O3 -march=native, this desktop (Xeon E3-1245 v6, 4 cores / 8 threads, 16 GB).
 Structure: tapered flat array in a real **mmap'd file** + table-free `O(d)`
 address, vs `std::unordered_map` keyed by packed columns. Payload is a cheap
 deterministic float (we are measuring the *structure*, not `f`). Same 3M random
@@ -80,7 +80,7 @@ structure-only memory gap is larger than 5.7×.
 ## OUT-OF-CORE (2026-07-27, ooc_bench.cpp) — the flagship experiment ✅
 
 Config: **N = C(36,15) = 5,567,902,560 entries (B=22, d=15), 22.27 GB file — 1.4×
-total RAM (16 GB)** — on a rotational HDD (harshest storage case), laptop.
+total RAM (16 GB)** — on a rotational HDD (harshest storage case), desktop.
 
 | phase | result |
 |---|---|
@@ -117,12 +117,12 @@ Full report: RESULTS_BIGBOX.md. Headlines folded into paper/main.tex.
 - **In-RAM N-sweep to 1.92B** (fixed d=10): memory ratio 5.7×→10.2× (widens,
   unbounded); at fixed d, tapered latency ~flat (99→154 ns) while hash grows
   (111→283 ns) → latency ratio WIDENS 1.1×→1.8× with N. (Reconciles earlier
-  laptop note: latency ratio is stable/widening at fixed d, machine-dependent,
+  desktop note: latency ratio is stable/widening at fixed d, machine-dependent,
   noisy on shared box — reported median of 3.) Hash never OOM'd on 499 GB
-  (78 GB peak); "hash can't exist" is the LAPTOP out-of-core story.
+  (78 GB peak); "hash can't exist" is the DESKTOP out-of-core story.
 - **Cold NVMe query** (N=1.12B, fadvise-evicted): p50 **67 µs**, mean 71 µs;
   warm re-run 1 µs (70× collapse = proof pages were cold). **~230× faster than
-  the laptop HDD** (15.5 ms p50) for the identical one-access structure. Clean
+  the desktop HDD** (15.5 ms p50) for the identical one-access structure. Clean
   three-tier hierarchy: resident ~100–280 ns / page-cache fresh-mmap ~1 µs /
   cold NVMe ~67–85 µs. (drop_caches blocked — Docker container; fadvise sufficed.)
 - **entmax dataset** `entmax_rows.npz` (199,669 GPT-2 rows, top-32 sorted +
@@ -132,10 +132,10 @@ Full report: RESULTS_BIGBOX.md. Headlines folded into paper/main.tex.
   per-query lookup. *(Both former caveats are now RESOLVED — see the WikiText
   regeneration below; this bigbox dataset is superseded.)*
 
-### entmax dataset REGENERATED on WikiText-2 (2026-07-28, laptop) — caveats cleared
+### entmax dataset REGENERATED on WikiText-2 (2026-07-28, desktop) — caveats cleared
 
 The bigbox dataset was built on this repo's own docs because `datasets` 5.0.0
-rejected the `wikitext` repo id. Regenerated on the laptop with the canonical
+rejected the `wikitext` repo id. Regenerated on the desktop with the canonical
 corpus; **both caveats from the bigbox run are now closed.**
 
 - Blocker was NOT the corpus (`datasets` 2.20.0 here loads `wikitext-2-raw-v1`
@@ -159,7 +159,7 @@ corpus; **both caveats from the bigbox run are now closed.**
 - Prior docs-corpus artifacts kept for comparison: `entmax_rows_docs.npz.bak`,
   `entmax_u_docs.bin.bak`. Full run log: `entmax_dump.log`.
 
-## APPLICATION BENCHMARKS (2026-07-27, laptop, C++ -O3) — one WIN, one honest LOSS
+## APPLICATION BENCHMARKS (2026-07-27, desktop, C++ -O3) — one WIN, one honest LOSS
 
 **Methodology note:** an earlier run had a bug in the nearest-grid interpolation
 (the scan started one column high, rounding every coordinate up → bias ≡ mean
