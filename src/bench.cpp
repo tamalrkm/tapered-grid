@@ -66,8 +66,17 @@ static inline float value_of(u64 r) {                 // cheap deterministic pay
     u64 h = r * 2654435761ull; return float(h & 0xFFFFFF) * (1.0f/16777216.0f);
 }
 
-static inline u64 pack(const int* cols, int d) {      // 4 bits/col (B<=16)
-    u64 k = 0; for (int i = 0; i < d; i++) k |= u64(cols[i]-1) << (4*i); return k;
+// Packed key: ceil(log2 B) bits per column, so any B fits without collisions
+// as long as bits*d <= 63 (the all-ones word is reserved as the open-addressing
+// empty sentinel). The earlier hardcoded 4 bits/column silently collided for
+// B > 16; the server N-sweep already used this generalization.
+static int PACK_BITS = 4;
+static void set_pack_bits(int B, int d) {
+    PACK_BITS = 1; while ((1 << PACK_BITS) < B) PACK_BITS++;
+    if (PACK_BITS * d > 63) { fprintf(stderr, "pack: %d bits x %d cols exceeds 63\n", PACK_BITS, d); exit(1); }
+}
+static inline u64 pack(const int* cols, int d) {
+    u64 k = 0; for (int i = 0; i < d; i++) k |= u64(cols[i]-1) << (PACK_BITS*i); return k;
 }
 
 static long peak_rss_mb() {
@@ -81,11 +90,35 @@ static void gen_query(u64& s, int d, int B, int* out) {
     std::sort(out, out + d);
 }
 
+
+// ---- open-addressing flat hash: inline 64-bit keys, linear probing ---------
+// The strongest simple in-RAM baseline: one contiguous array of 16-byte
+// {key,value} slots (the layout of absl::flat_hash_map<u64,float>), capacity a
+// power of two chosen so that load <= 7/8 (absl's max load), splitmix64
+// finalizer as the hash, linear probing. Empty slot = all-ones key, which no
+// packed key can equal because set_pack_bits() enforces bits*d <= 63.
+static inline u64 mix64(u64 x){ x+=0x9e3779b97f4a7c15ull; x=(x^(x>>30))*0xbf58476d1ce4e5b9ull;
+    x=(x^(x>>27))*0x94d049bb133111ebull; return x^(x>>31); }
+struct OASlot { u64 key; float val; };
+struct OATable {
+    OASlot* s; u64 mask; u64 cap;
+    static const u64 EMPTY = ~0ull;
+    OATable(u64 n, bool nohuge=false){ cap=1; while (double(n)/double(cap) > 0.875) cap<<=1; mask=cap-1;
+        size_t bytes=cap*sizeof(OASlot);
+        s=(OASlot*)mmap(nullptr,bytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+        madvise(s,bytes, nohuge?MADV_NOHUGEPAGE:MADV_HUGEPAGE);
+        for(u64 i=0;i<cap;i++) s[i].key=EMPTY; }
+    inline void insert(u64 k,float v){ u64 i=mix64(k)&mask;
+        while(s[i].key!=EMPTY && s[i].key!=k) i=(i+1)&mask; s[i].key=k; s[i].val=v; }
+    inline float get(u64 k) const { u64 i=mix64(k)&mask;
+        while(s[i].key!=k) i=(i+1)&mask; return s[i].val; }
+};
+
 int main(int argc, char** argv) {
-    if (argc < 6) { fprintf(stderr, "usage: %s tapered|hash B d M seed\n", argv[0]); return 1; }
+    if (argc < 6) { fprintf(stderr, "usage: %s tapered|tapered-ram|tapered-ram-nohuge|tabled|hash|oahash|oahash-nohuge|rankonly B d M seed\n", argv[0]); return 1; }
     std::string mode = argv[1];
     int B = atoi(argv[2]), d = atoi(argv[3]); long M = atol(argv[4]); u64 seed = atoll(argv[5]);
-    pascal();
+    pascal(); set_pack_bits(B, d);
     u64 N = C[B + d - 1][d];
     printf("mode=%-7s B=%d d=%d  N=%llu  M=%ld\n", mode.c_str(), B, d, (unsigned long long)N, M);
 
@@ -124,6 +157,42 @@ int main(int argc, char** argv) {
         else        for (long q = 0; q < M; q++) checksum += arr[ rank_fixed (&Q[(size_t)q*d], d, B) ];
         lat_ns = std::chrono::duration<double,std::nano>(clk::now()-t1).count() / M;
         munmap(arr, (size_t)N*sizeof(float)); close(fd);
+    } else if (mode == "tapered-ram" || mode == "tapered-ram-nohuge") {
+        // same closed-form index, values in anonymous memory instead of a file
+        // mapping: isolates the index from the page-size/TLB effects of mmap.
+        auto t0 = clk::now();
+        size_t bytes=(size_t)N*sizeof(float);
+        float* arr=(float*)mmap(nullptr,bytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+        madvise(arr,bytes, mode=="tapered-ram-nohuge"?MADV_NOHUGEPAGE:MADV_HUGEPAGE);
+        for (u64 r = 0; r < N; r++) arr[r] = value_of(r);
+        build_s = std::chrono::duration<double>(clk::now()-t0).count();
+        auto t1 = clk::now();
+        for (long q = 0; q < M; q++) checksum += arr[ rank_fixed(&Q[(size_t)q*d], d, B) ];
+        lat_ns = std::chrono::duration<double,std::nano>(clk::now()-t1).count() / M;
+        munmap(arr,bytes);
+    } else if (mode == "rankonly") {
+        // index arithmetic alone: no memory access at all (sum of ranks)
+        auto t1 = clk::now();
+        u64 acc=0; for (long q = 0; q < M; q++) acc += rank_fixed(&Q[(size_t)q*d], d, B);
+        lat_ns = std::chrono::duration<double,std::nano>(clk::now()-t1).count() / M;
+        checksum = double(acc & 0xFFFFFF);
+    } else if (mode == "oahash" || mode == "oahash-nohuge") {
+        auto t0 = clk::now();
+        OATable T(N, mode == "oahash-nohuge");
+        std::vector<int> cols(d, 1);
+        for (u64 done = 0; done < N; done++) {
+            T.insert(pack(cols.data(), d), value_of(rank_fixed(cols.data(), d, B)));
+            int i = d - 1; while (i >= 0 && cols[i] == B) i--;
+            if (i < 0) break; cols[i]++; for (int j = i+1; j < d; j++) cols[j] = cols[i];
+        }
+        build_s = std::chrono::duration<double>(clk::now()-t0).count();
+        printf("  oahash: capacity=%llu  load=%.3f  slot=%zu B  table=%.0f MB\n",
+               (unsigned long long)T.cap, double(N)/double(T.cap), sizeof(OASlot),
+               double(T.cap)*sizeof(OASlot)/1048576.0);
+        auto t1 = clk::now();
+        for (long q = 0; q < M; q++) checksum += T.get(pack(&Q[(size_t)q*d], d));
+        lat_ns = std::chrono::duration<double,std::nano>(clk::now()-t1).count() / M;
+        munmap(T.s, T.cap*sizeof(OASlot));
     } else {
         // ---- build a real unordered_map keyed by packed cols -------------
         auto t0 = clk::now();

@@ -1,0 +1,76 @@
+# 2026-09-05T18:46:50+05:30
+[build] B=22 d=15  N=5567902560  file=22.27 GB
+  build=231.3s  (24 Mentries/s, 96 MB/s)
+[walk] B=22 d=15  N=5567902560  file=22.27 GB
+  walk: 20000 steps (33924 proposals), addressing=lex
+  resident before run: 0.00% of 5437405 pages
+  distinct pages touched: 11929 of 20000 steps
+  M=20000 total=78.4s mean=3920us p50=238us p90=8803us p99=32104us
+  page-cache hit (mincore) = 40.4%   same-page-as-previous = 32.8%
+  hit-mean=0.2us  miss-mean=6.56ms (n=11929)
+  per-coordinate (1=leading): coord steps hit% samepage%
+     1   1061   11.9    0.0
+     2   1144   10.7    0.0
+     3   1220   10.2    0.0
+     4   1317   11.2    0.0
+     5   1338   12.6    0.0
+     6   1312   11.0    0.0
+     7   1492   11.5    0.0
+     8   1434   10.0    0.1
+     9   1480   17.9    7.5
+    10   1430   34.1   24.5
+    11   1396   64.8   60.6
+    12   1252   93.1   92.1
+    13   1385   98.6   98.1
+    14   1372   99.6   99.6
+    15   1367  100.0   99.9
+  checksum=9925.194528 expect=9925.194528  CORRECT
+[walk] B=22 d=15  N=5567902560  file=22.27 GB
+  walk: 20000 steps (33924 proposals), addressing=hashed
+  resident before run: 0.00% of 5437405 pages
+  distinct pages touched: 18663 of 20000 steps
+  M=20000 total=164.5s mean=8225us p50=8130us p90=12188us p99=18441us
+  page-cache hit (mincore) = 6.7%   same-page-as-previous = 0.0%
+  hit-mean=0.2us  miss-mean=8.80ms (n=18663)
+  per-coordinate (1=leading): coord steps hit% samepage%
+     1   1061    7.5    0.0
+     2   1144    6.6    0.0
+     3   1220    5.2    0.0
+     4   1317    6.8    0.0
+     5   1338    6.9    0.0
+     6   1312    6.2    0.0
+     7   1492    7.8    0.0
+     8   1434    5.9    0.0
+     9   1480    6.6    0.0
+    10   1430    7.6    0.0
+    11   1396    7.0    0.0
+    12   1252    6.2    0.0
+    13   1385    6.9    0.0
+    14   1372    6.3    0.0
+    15   1367    6.5    0.0
+  checksum=9977.376615 expect=9977.376615  CORRECT
+[walk] B=22 d=15  N=5567902560  file=22.27 GB
+  walk: 20000 steps (33750 proposals), addressing=lex
+  resident before run: 0.00% of 5437405 pages
+  distinct pages touched: 11843 of 20000 steps
+  M=20000 total=48.1s mean=2404us p50=238us p90=7974us p99=13454us
+  page-cache hit (mincore) = 40.8%   same-page-as-previous = 33.5%
+  hit-mean=0.1us  miss-mean=4.04ms (n=11843)
+  per-coordinate (1=leading): coord steps hit% samepage%
+     1   1128   12.5    0.0
+     2   1337   10.6    0.0
+     3   1363   11.2    0.0
+     4   1426   11.9    0.0
+     5   1305   10.7    0.0
+     6   1263   10.6    0.1
+     7   1198   10.0    0.7
+     8   1309   12.6    1.8
+     9   1330   17.2    7.7
+    10   1413   36.7   28.6
+    11   1436   62.8   57.8
+    12   1383   91.0   89.8
+    13   1345   98.5   98.4
+    14   1354   99.8   99.7
+    15   1410  100.0  100.0
+  checksum=9915.555155 expect=9915.555155  CORRECT
+DONE-WALK 2026-09-05T18:55:33+05:30

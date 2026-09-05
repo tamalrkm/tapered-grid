@@ -39,10 +39,11 @@ measured ones. Everything is self-contained apart from the α-entmax dataset
 |---|---|
 | Correctness of the closed-form rank/unrank (6,426 keys, all `B≤8, d≤6`); reproduces published index **328** and file size **C(29,14)=77,558,760** | `python3 src/refimpl.py` |
 | Warped/selective ranker; reproduces published index **400** (6,501 keys + 30 random nested configs) | `python3 src/warped.py` |
-| In-RAM head-to-head and `N`-sweeps vs `std::unordered_map` | `./bench tapered 16 13 3000000 42` and `./bench hash 16 13 3000000 42` |
+| In-RAM head-to-head and `N`-sweeps vs `std::unordered_map` **and an open-addressing flat table** (inline 64-bit keys, linear probing, load ≤ 7/8) | `./bench tapered 16 13 3000000 42`, `./bench hash 16 13 3000000 42`, `./bench oahash 16 13 3000000 42`; the `tapered-ram`, `rankonly` and `*-nohuge` modes isolate page-size/TLB effects and the bare index cost |
 | Base scheme's table-based index (pinned) for comparison | `./bench tabled 16 13 3000000 42` |
 | **Out-of-core**: 5.57e9 entries / 22.3 GB file, one seek per query | `./ooc_bench build 22 15 && ./ooc_bench scan 22 15 && ./ooc_bench query 22 15 20000 42` |
-| Taper-mismatch penalty, Theorem 1 (33 cells, 0.6–8% vs exact) | `python3 src/verify_penalty.py` |
+| **Locality** (Lemma 2, prefix contiguity): random-walk queries under lexicographic vs hashed addressing, page-cache hits decided by `mincore()` | `./ooc_bench walk 22 15 20000 42 lex` and `./ooc_bench walk 22 15 20000 42 hashed` |
+| Taper-mismatch penalty, Theorem 3 (33 cells, 0.6–8% vs exact) | `python3 src/verify_penalty.py` |
 | Optimal-schedule check (`s=r`; halving optimal iff `r=½`) | `python3 src/verify_schedule.py` |
 | **Plackett–Luce application** (memo 25–55× faster than Newton) | `./pl_bench 16 12 2.0` |
 | **α-entmax application** (negative result: memo *loses* to the exact solver) | `python3 src/dump_entmax_rows.py` then `./entmax_bench 16 12 2.0` |
@@ -50,8 +51,7 @@ measured ones. Everything is self-contained apart from the α-entmax dataset
 Measured outputs from the runs reported in the paper are in `RESULTS.md`
 (desktop: Xeon E3-1245 v6, 4 cores / 8 threads, 16 GB, 1 TB 7200 rpm SATA HDD)
 and `RESULTS_SERVER.md` (server: dual EPYC 9335 / 128 threads, 499 GB, NVMe,
-H200). `THEORY_PENALTY.md` contains the derivation and numerical verification
-behind Theorem 1 and the bias lemma.
+H200). `THEORY_PENALTY.md` contains the derivation and numerical verification behind Theorem 3 and the bias lemma.
 
 ### Notes on two experiments
 
@@ -86,7 +86,7 @@ solver against bisection.
 src/refimpl.py         reference rank/unrank + exhaustive tests
 src/warped.py          nested-alphabet (warped/selective) ranker + verification
 src/verify_schedule.py optimal taper ratio, numerically
-src/verify_penalty.py  Theorem 1 vs the exact discrete optimum
+src/verify_penalty.py  Theorem 3 vs the exact discrete optimum
 src/entmax_analyze.py  α-entmax solver check + support-size profiling
 src/bench.cpp          in-RAM: tapered / base-table / hash
 src/ooc_bench.cpp      out-of-core: build / scan-verify / random queries

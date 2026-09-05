@@ -45,6 +45,16 @@ structure-only memory gap is larger than 5.7×.
 
 **Clean sweep: FIXED d=10, vary B (query cost constant) — isolates N-scaling:**
 
+> ⚠️ **INVALID hash rows for B>16 (found 2026-09-05).** This sweep used
+> `bench.cpp`'s original `pack()` with a hardcoded 4 bits/column, which only
+> represents B≤16 without collisions. For B=18 and B=22 the packed keys
+> collided (checksums differed from `tapered`), so the hash latency/RSS in
+> those two rows are for a *smaller, wrong* key set. The server sweep
+> (RESULTS_BIGBOX.md, Table 3 of the paper) used a generalized variable-width
+> pack and matched checksums, so the paper is unaffected. `pack()` is now
+> variable-width in `bench.cpp`; corrected desktop numbers for all modes are
+> in `results_oahash.txt`.
+
 | N (B) | tapered lat | hash lat | speedup | tapered RSS | hash RSS | mem ratio |
 |---|---|---|---|---|---|---|
 | 92K (10)   | 23.5  | 68.6  | 2.9× | 79  | 83   | 1.05× |
@@ -220,3 +230,69 @@ memoize only when exact evaluation is genuinely *iterative/transcendental*
       at scale — revisit the paper's "~10× vs recomputation" claim with error bars.
 - [ ] Warped/selective indexer at scale; reproduce Example 2 index **400** first.
 - [ ] Sweep N (1M→100M) and d to show the crossover and the widening gap.
+
+## OPEN-ADDRESSING BASELINE + DECOMPOSITION (2026-09-05, desktop, `results_oahash.txt`)
+
+Same session, same query stream, all checksums identical across modes (the
+variable-width `pack()` fix is validated by this). New `bench.cpp` modes:
+`rankonly` (index arithmetic, no access), `tapered-ram` (array in anonymous
+memory, THP), `tapered-ram-nohuge`, `oahash` (inline u64 keys, linear probing,
+splitmix64, pow2 capacity, load ≤ 7/8 — absl::flat_hash_map<u64,float> layout),
+`oahash-nohuge`.
+
+**Head-to-head B=16 d=13 N=37.44M, 3M queries:**
+
+| mode | query ns | peak RSS MB | build s |
+|---|---|---|---|
+| rankonly | 22.7 | — | — |
+| tapered-ram | 78.2 | 294 | 0.04 |
+| tapered-ram-nohuge | 90.1 | 294 | 0.08 |
+| tapered (mmap file) | 98.4 | 294 | 1.09 |
+| tabled (pinned, mmap) | 86.7 | 294 | 2.67 |
+| oahash (load 0.558, 1024 MB table) | **54.1** | 1175 | 4.24 |
+| oahash-nohuge | 64.4 | 1175 | 5.35 |
+| unordered_map | 266.4 | 1675 | 6.88 |
+
+**Reading:** query = index (23 ns) + one DRAM access (~55 ns). The flat table
+makes the same single access with a 2 ns hash, so it is **1.45× faster** to
+query than the array; the array is **4.0× smaller in RSS (7.2× structure-only)
+and 100× faster to build**. THP is worth 10–12 ns to both; the mmap file costs
+a further ~8 ns of minor faults. This REPLACES the paper's earlier "1.1–1.8×
+faster" latency claim, which was vs unordered_map only (still true: 2.7× here).
+
+**Fixed d=10 sweep, 2M queries (tapered-ram / oahash / unordered_map):**
+
+| N (B) | tapered ns / MB | oahash ns / MB | umap ns / MB |
+|---|---|---|---|
+| 92K (10)   | 20.4 / 79  | 22.8 / 81   | 46.1 / 83 |
+| 1.14M (14) | **27.3** / 83 | 44.1 / 111 | 132.3 / 126 |
+| 8.44M (18) | 75.5 / 111 | **49.6** / 335 | 169.9 / 422 |
+| 44.4M (22) | 78.5 / 248 | **57.0** / 1103 | 196.6 / 1879 |
+
+Cache band: at N=1.14M the 4.6 MB array fits L3 (8 MB) and the 32 MB table
+does not → array 1.6× faster. Past it the flat table's ~20–25 ns edge is the
+steady state.
+
+## LOCALITY UNDER A PERTURBATION WORKLOAD (2026-09-05, desktop, `results_walk.txt`)
+
+Lemma 2 (prefix contiguity) → tail-coordinate steps stay on-page, leading
+steps jump; hashed addressing scatters everything. `ooc_bench walk`: rebuilt
+the 22.27 GB file (231 s), random walk in key space (one coordinate ±1 per
+step, uniform coordinate, monotone), 20,000 steps, file evicted (0.00%
+resident by mincore) before each run, hit decided by **mincore before the
+access**, not timing. Same walk addressed by lex rank vs by mix64(key)%N.
+
+| | lex (seed 42) | lex (seed 7) | hashed |
+|---|---|---|---|
+| page-cache hit | **40.4%** | 40.8% | 6.7% |
+| same page as previous step | 32.8% | 33.5% | 0.0% |
+| distinct pages touched | 11,929 | 11,843 | 18,663 |
+| mean / p50 latency | 3.9 ms / 0.24 ms | 2.4 ms / 0.24 ms | 8.2 ms / 8.1 ms |
+| miss mean | 6.56 ms | 4.04 ms | 8.80 ms |
+| wall clock | 78 s | 48 s | 165 s |
+
+Per-coordinate hit% (lex, seed 42): coords 1–8 ≈ 10–13%; 9: 18%; 10: 34%;
+11: 65%; 12: 93%; 13: 99%; 14: 100%; 15: 100%. Same-page%: 0 / 8 / 25 / 61 /
+92 / 98 / 100 / 100. Hashed: flat 5–8% everywhere, same-page 0.
+Misses are cheaper under lex too (shorter seeks on the HDD). All checksums
+CORRECT.
