@@ -88,8 +88,8 @@ src/warped.py          nested-alphabet (warped/selective) ranker + verification
 src/verify_schedule.py optimal taper ratio, numerically
 src/verify_penalty.py  Theorem 3 vs the exact discrete optimum
 src/entmax_analyze.py  α-entmax solver check + support-size profiling
-src/bench.cpp          in-RAM: tapered / base-table / hash
-src/ooc_bench.cpp      out-of-core: build / scan-verify / random queries
+src/bench.cpp          in-RAM: tapered / tapered-ram / rankonly / base-table / hash / oahash
+src/ooc_bench.cpp      out-of-core: build / scan-verify / random queries / locality walk
 src/pl_bench.cpp       Plackett–Luce application benchmark
 src/entmax_bench.cpp   α-entmax application benchmark
 src/spike_bench.py     early Python size/latency spike (superseded by the C++)
@@ -106,8 +106,9 @@ This artifact is archived on Zenodo with a DOI:
 release; `10.5281/zenodo.21675852` pins v1.0.0, the snapshot behind the numbers
 reported in the paper.
 
-The paper itself is under submission; until it appears, please cite this
-artifact and the 2015 TCS paper it builds on.
+The paper is on arXiv as [arXiv:2609.20276](https://arxiv.org/abs/2609.20276)
+and is under journal submission; until the journal version appears, please cite
+the arXiv version together with this artifact.
 
 ## License
 

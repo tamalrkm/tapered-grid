@@ -26,6 +26,11 @@
       "identifier": "10.1016/j.tcs.2015.03.049",
       "relation": "isSupplementTo",
       "scheme": "doi"
+    },
+    {
+      "identifier": "arXiv:2609.20276",
+      "relation": "isSupplementTo",
+      "scheme": "arxiv"
     }
   ]
 }
