@@ -60,19 +60,13 @@ Educational and Research Institute (RKMVERI), Belur, West Bengal, India}
 Memoizing an expensive function of a sorted score vector is a
 data-structure problem before it is a numerical one. At a billion
 gridpoints, a hash map or a search tree spends most of its space on keys
-that the grid already fixes. We describe a memo table that stores no keys
-at all. The address of an entry is computed from the sorted argument
+that the grid already fixes. We describe a memo table that does not store keys. The address of an entry is computed from the sorted argument
 itself, in closed form, in $O(d)$ arithmetic, so $N$ values occupy exactly
 $N$ slots. The argument can be recovered from a bare index, and the table
-can be memory-mapped and read from a file larger than RAM. Against a chained hash map the structure uses $5.7\times$ less memory at $N=37.4$M and $10.2\times$ less at $N=1.9$B, answers queries $1.1$--$2.7\times$ faster, and builds $48$--$250\times$ faster; on 64 threads its construction needs no coordination at all, where a sharded hash gains a factor of only $1.17$. Against the strongest simple baseline, an open-addressing table with inline keys, it is $4$--$7\times$ smaller and $100\times$ faster to build but $1.45\times$ slower to query, the difference being exactly the $O(d)$ index arithmetic; we report the deficit and decompose it.
+can be memory-mapped and read from a file larger than RAM. Against a chained hash map the structure uses $5.7\times$ less memory at $N=37.4$M and $10.2\times$ less at $N=1.9$B, answers queries $1.1$--$2.7\times$ faster, and builds $48$--$250\times$ faster; on 64 threads its construction needs no coordination at all, where a sharded hash gains a factor of only $1.17$. Against the strongest simple baseline, an open-addressing table with inline keys, it is $4$--$7\times$ smaller and $100\times$ faster to build but $1.45\times$ slower to query, and the difference is the $O(d)$ index arithmetic, which we measure on its own.
 At $22$\,GB on a $16$\,GB desktop it serves each query in one disk access, a
-size at which no key-storing container can be built. The address is
-available in closed form for a simple reason: the key set of the tapered
-grid of Biswas and Regan (TCS~2015) is the set of multiset combinations,
-so its index is the classical combinatorial number system. Saying so
-removes the preprocessing tables of the original scheme and supplies the
-$O(d)$ unranking it lacked, which is what makes key-free storage and
-coordination-free construction possible. We also give a finite-$\eps$
+size at which no key-storing container can be built. The closed form exists because the key set of the tapered grid of Biswas and Regan (TCS~2015) is the set of multiset combinations,
+so its index is the classical combinatorial number system. Once this is stated, the preprocessing tables of the original scheme become unnecessary and an $O(d)$ unranking becomes available, and the unranking is the step that lets keys be dropped and the table be filled in any order. We also give a finite-$\eps$
 closed form for the cost of a mistuned taper, and two applications.
 Memoizing the Plackett--Luce normalization runs $25$--$55\times$ faster
 than Newton's method. Memoizing $\alpha$-entmax thresholds is not worth
@@ -91,19 +85,12 @@ structures \sep external memory \sep memory-mapped I/O \sep Plackett--Luce
 \section{Introduction}\label{sec:intro}
 
 Memoizing an expensive function at scale is a data-structure problem. A
-grid fine enough to be useful has billions of points. The containers one
-reaches for first waste space in a specific way: a hash map or a search
-tree stores the key of every entry alongside its value, although the grid
-already fixes what the keys are. At $10^9$ entries that overhead decides
+grid fine enough to be useful has billions of points. The usual containers all waste space in the same way: a hash map or a search tree stores the key of every entry next to its value, although the grid already determines what the keys are. At $10^9$ entries that overhead decides
 whether the table fits in memory.
 
 This paper starts from the view that, for a function of a sorted
 argument, the keys need not be stored, and reports what the memo table
-looks like when they are not. It holds $N$ values in exactly $N$ slots.
-Each slot is addressed in $O(d)$ arithmetic by the argument itself. Any
-number of threads can fill it without coordinating, and it can be
-memory-mapped and read past the limits of RAM at one disk access per
-query. Against a chained hash-map memo it is $5.7$--$10.2\times$ smaller, and the gap widens with $N$; it answers queries $1.1$--$2.7\times$ faster and builds $48$--$250\times$ faster. Against an open-addressing table with inline keys, the strongest simple baseline, it is $4$--$7\times$ smaller and $100\times$ faster to build, and $1.45\times$ slower to query, because it pays an $O(d)$ index on top of the same single memory access. We measure that deficit rather than argue around it.
+looks like when they are not. The table holds $N$ values in $N$ slots, each addressed by $O(d)$ arithmetic on the argument itself; any number of threads can fill it without coordination, and it can be memory-mapped and queried past the limits of RAM at one disk access per lookup. Against a chained hash-map memo it is $5.7$--$10.2\times$ smaller, and the gap widens with $N$; it answers queries $1.1$--$2.7\times$ faster and builds $48$--$250\times$ faster. Against an open-addressing table with inline keys, the strongest simple baseline, it is $4$--$7\times$ smaller and $100\times$ faster to build, and $1.45\times$ slower to query, because it pays an $O(d)$ index on top of the same single memory access. We measure the deficit and say where it comes from.
 
 The functions we have in mind arise across statistical estimation and
 machine learning. Each takes a sorted vector of scores, and its value
@@ -119,8 +106,7 @@ setting.\footnote{The present author is the first author of
 \cite{biswas2015}, published under the name Tamal T.\ Biswas. That work is
 discussed in the third person throughout for readability; where the
 present paper corrects or sharpens its claims, the criticism is
-self-directed.} They observed that two structural facts make memoization
-unusually attractive here. The argument may be taken as sorted, because
+self-directed.} They observed that two features of the problem make memoization unusually attractive. The argument may be taken as sorted, because
 the function is symmetric and only the ranking matters. And its
 sensitivity decays with rank, because alternatives far down the ordering
 barely affect the outcome. Their answer was a tapered grid: fine
@@ -151,14 +137,12 @@ becomes a flat array of values addressed by content.
 \begin{enumerate}
 \item \textbf{A key-free memo table (Sec.~\ref{sec:structure}).} The
 address of an entry can be computed from that entry's own argument, and
-the argument can be recovered from the address. The memo table therefore
-needs nothing but its payloads: $N$ values in exactly $N$ slots, with no
-keys, no pointers and no per-entry metadata. The array is contiguous, so
+the argument can be recovered from the address. The memo table therefore reduces to its payloads: $N$ values in $N$ slots, with no keys, pointers or per-entry metadata. The array is contiguous, so
 it can be memory-mapped and served from a file larger than RAM at one disk
 access per query. It can also be filled in any order, so construction
 needs no coordination between threads.
 \item \textbf{A systems evaluation at scale (Sec.~\ref{sec:experiments}).}
-We compare against a chained hash map and an inline-key open-addressing table, up to $N=1.9$B entries in RAM and $5.6$B out of core. The memory advantage of the values-only array grows without bound in $N$, from $5.7\times$ to $10.2\times$ over the chained map and $4$--$7\times$ over the flat table. Against the chained map, queries are $1.1$--$2.7\times$ faster; against the flat table they are $1.45\times$ slower, and we decompose the query into index arithmetic (23\,ns at $d{=}13$) plus one memory access to show that this is the whole difference. Construction is $48$--$250\times$ faster than the chained map and $100\times$ faster than the flat table. On 64 threads a build with no
+We compare against a chained hash map and an inline-key open-addressing table, up to $N=1.9$B entries in RAM and $5.6$B out of core. The memory advantage of the values-only array grows without bound in $N$, from $5.7\times$ to $10.2\times$ over the chained map and $4$--$7\times$ over the flat table. Against the chained map, queries are $1.1$--$2.7\times$ faster; against the flat table they are $1.45\times$ slower, and we decompose the query into index arithmetic (23\,ns at $d{=}13$) plus one memory access, and the index accounts for the difference. Construction is $48$--$250\times$ faster than the chained map and $100\times$ faster than the flat table. On 64 threads a build with no
 coordination reaches the machine's memory-bandwidth ceiling, while the
 sharded hash gains only $1.17\times$ (\S\ref{sec:parallel}). At $22$\,GB
 on a $16$\,GB desktop the structure answers each query in one disk access,
@@ -239,8 +223,7 @@ instances agree entry-by-entry (e.g.\ $V_{5,1}=\binom{19}{3}=969$,
 $V_{4,2}=\binom{17}{2}=136$). The same identity accounts for the size of
 that paper's production file: with $B{=}16$ and depth $15$, the first
 coordinate pinned to $0$ leaves $14$ free positions and
-$\binom{29}{14}=77{,}558{,}760$ keys, exactly the reported entry count.
-Recognizing the tables as binomials is what makes them removable.
+$\binom{29}{14}=77{,}558{,}760$ keys, which is the reported entry count. Once the tables are recognized as binomials they can be removed.
 
 %% =======================================================================
 \section{Table-Free Indexing and Unranking}\label{sec:index}
@@ -274,10 +257,9 @@ $\sum_{t=lo}^{hi}\binom{t}{k}=\binom{hi+1}{k+1}-\binom{lo}{k+1}$ collapses
 it to the difference of two binomials, giving \eqref{eq:rank}.
 \end{proof}
 
-Two properties are worth noting. Only positions where $m$ strictly
+Two properties of \eqref{eq:rank} matter later. Only positions where $m$ strictly
 increases contribute, since $m_{i-1}=m_i$ makes the bracket vanish; and
-the only precomputation is a Pascal table of $O((B{+}d)^2)$ words, shared
-across every grid instance rather than rebuilt per scheme.
+the only precomputation is a Pascal table of $O((B{+}d)^2)$ words, shared by every grid instance instead of being rebuilt per scheme.
 
 \paragraph{A correctness restriction removed.} Equation~(3) of
 \cite{biswas2015} sums over $i=1,\dots,d-1$ and therefore never accounts
@@ -317,13 +299,9 @@ of completions it heads still lies below the residual index.
 
 Because $v$ never decreases, the loop visits each of the $B$ values at
 most once in total, giving $O(B{+}d)$ time; replacing the linear scan by
-binary search over the same monotone predicate gives $O(d\log B)$. (The
-rank direction is unconditionally $O(d)$; we state the inverse's cost
-honestly, as it is $\Theta(d)$ only when $B=O(d)$.)
+binary search over the same monotone predicate gives $O(d\log B)$. (The rank direction is $O(d)$ unconditionally; the inverse is $\Theta(d)$ only when $B=O(d)$.)
 
-The original scheme provides no inverse, and its absence is what forces
-keys to be stored. With Algorithm~\ref{alg:unrank} available, three things
-follow. Storage becomes \emph{key-free}: the array holds values only, and
+The original scheme has no inverse, and without one the keys have to be stored. Algorithm~\ref{alg:unrank} changes three things. Storage becomes \emph{key-free}: the array holds values only, and
 any argument can be regenerated on demand. Construction becomes
 \emph{order-free}: entry $r$ can be computed from $r$ alone, so $T$
 workers may fill disjoint index ranges with no locks, no shared state and
@@ -349,9 +327,7 @@ exhaustive lexicographic enumeration on that paper's own selective
 configuration ($B{=}17$, $d{=}5$, reduction at depth 4; $6{,}501$ keys) and
 on $30$ randomly generated nested configurations, with rank and unrank
 agreeing everywhere. It reproduces the paper's published index $400$ for
-its worked example, which also settles a point of interpretation: the
-selective index \emph{is} the plain lexicographic rank of the nested key
-set, so no bespoke recursion is needed to compute it.
+its worked example, which also settles a point of interpretation: the selective index is the lexicographic rank of the nested key set, so no bespoke recursion is needed to compute it.
 
 \subsection{Complexity summary}
 Table~\ref{tab:complexity} collects the costs of the two schemes.
@@ -393,7 +369,7 @@ to the payload, the additive table being independent of $N$.
 
 Against the baselines we measure, the separation is straightforward
 accounting: a container that stores each key explicitly, as \texttt{unordered\_map} over packed columns and every textbook $k$-d tree do, occupies at least $N(w+d\lfloor\log_2 B\rfloor)$ bits, plus pointer
-inventory. This is precisely the overhead our measurements show
+inventory. This is the overhead our measurements show
 (\S\ref{sec:scaling}). It should not be overstated as a general lower
 bound, however: \emph{retrieval} structures for arbitrary static key sets
 \cite{pagh2001,dietzfelbinger2008} store a function in $(1+o(1))Nw$ bits
@@ -413,11 +389,7 @@ a single set determined by $(B,d)$. The operative property is that the
 lexicographic prefix-counting function of this family has a closed form;
 a cheap description alone would not suffice.
 
-\paragraph{Order preservation and locality.} A general minimal perfect
-hash scatters neighbouring keys across the table by design. The
-lexicographic rank does the opposite, and the consequence is worth
-stating, because it is what makes the structure usable from a disk
-rather than merely storable on one.
+\paragraph{Order preservation and locality.} A general minimal perfect hash scatters neighbouring keys across the table; that is part of what makes it a hash. The lexicographic rank keeps them together, and this turned out to matter more than we first expected, because it is the reason the structure can be used from a disk and not only stored on one.
 
 \begin{lemma}[Prefix contiguity]\label{lem:prefix}
 Fix $j\in\{0,\dots,d\}$ and a non-decreasing prefix $(m_1,\dots,m_j)$.
@@ -435,17 +407,13 @@ multisets of that size drawn from $B-m_j+1$ symbols, which is
 $\binom{B-m_j+d-j}{d-j}$.
 \end{proof}
 
-Two things follow. First, a query that fixes the leading $j$ coordinates
-and asks for every completion is a sequential scan of one interval, with
-no index computation at all beyond its two endpoints. Second, a change to
-coordinate $i$ alone, with the prefix before it held fixed, moves the
+Two consequences. A query that fixes the leading $j$ coordinates and asks for every completion is a sequential scan of one interval, and only its two endpoints need computing. And a change to coordinate $i$ alone, with the prefix before it held fixed, moves the
 address within the prefix-$(i-1)$ block, whose length
 $\binom{B-m_{i-1}+d-i+1}{d-i+1}$ shrinks combinatorially as $i$
 approaches $d$: a step in the last coordinate moves the address by one
 entry, a step in the second-to-last by at most $B$, and so on. The
 addressing therefore places the tail coordinates in the low-order digits
-of the address, and these are exactly the coordinates the taper resolves
-most coarsely. A workload that perturbs a key a little at a time, as an
+of the address, and these are the coordinates the taper resolves most coarsely. A workload that perturbs a key a little at a time, as an
 iterative estimation loop does, revisits the same pages when it moves in
 the tail and jumps only when it moves in the head. A hash-addressed
 layout has no such property for any coordinate. \S\ref{sec:ooc} measures
@@ -501,8 +469,7 @@ The bracket is the squared ratio of effective depths: the optimum
 collects a $\ln k$ \emph{depth bonus} (its per-level error $\eps/k$
 shrinks as levels activate) that no fixed-ratio schedule matches. Hence
 $s=r$ is optimal; halving is optimal iff $r=\tfrac12$
-(e.g.\ at $r=0.75$, $\eps=10^{-8}$, halving inflates $\ln|U|$ by $1.88\times$, not the asymptotic $2.41\times$).
-Positioning: a sharpened, two-sided, finite-$\eps$ closed form, for this
+(e.g.\ at $r=0.75$, $\eps=10^{-8}$, halving inflates $\ln|U|$ by $1.88\times$, where the asymptotic formula would say $2.41\times$). Relative to prior work this is a sharpened, two-sided, finite-$\eps$ closed form, for this
 construction, of the known rate-balancing phenomenon
 \cite{griebel2000,bungartz2004,nobile2008,gopal2019,xiang2023};
 the dimension-independence of $|U|$ itself is the classical
@@ -523,16 +490,7 @@ $\delta_i$. Then
 one order smaller than the worst-case error $\sum_i g_i\delta_i/2$.
 \end{lemma}
 
-\noindent That is, averages
-over many queries converge at the second-order rate, which is what the
-aggregate applications of Section~\ref{sec:apps} rely on. This is
-high-resolution quantization folklore (Bennett lineage \cite{bennett1948})
-applied to our structure; it also corrects the empirical ``unbiasedness'' claim of \cite{biswas2015}: the bias is $O(\delta^2)$, not zero.
-Caveats: one-sided cells (monotone boundary, truncated tail levels) retain
-first-order bias, though under the optimal taper their influence budget is
-already $O(\eps)$; and the balanced-credit interpolation of
-\cite{biswas2015} is deterministic rather than per-cell symmetric, so it is
-consistent with but not covered by Lemma~\ref{lem:bias}.
+\noindent So averages over many queries converge at the second-order rate, and the aggregate applications of Section~\ref{sec:apps} rely on this. The result is high-resolution quantization folklore in the Bennett lineage \cite{bennett1948}, applied to our structure. It also corrects the empirical ``unbiasedness'' claim of \cite{biswas2015}: the bias is $O(\delta^2)$ rather than zero. Two caveats. One-sided cells (the monotone boundary and the truncated tail levels) keep a first-order bias, although under the optimal taper their influence budget is already $O(\eps)$. And the balanced-credit interpolation of \cite{biswas2015} is deterministic, not per-cell symmetric, so Lemma~\ref{lem:bias} is consistent with it without covering it.
 The proof is in \ref{app:bias}.
 
 %% =======================================================================
@@ -583,15 +541,9 @@ open-addressing flat table & \textbf{54.1 ns} & 1175 MB & 4.24 s \\
 \bottomrule
 \end{tabular}
 \end{table}
-Table~\ref{tab:headtohead} gives the desktop head-to-head. Three readings
-matter.
+Table~\ref{tab:headtohead} is the desktop head-to-head. We read it in three ways.
 
-\emph{Decomposition.} The index arithmetic alone costs 23\,ns at $d{=}13$
-(first row: ranks computed, nothing read). A query against the array in
-anonymous memory costs 78\,ns, so a query is the index plus one memory
-access of about 55\,ns and nothing else. The file-mapped variant pays a
-further 20\,ns for 4\,KB pages and minor faults. That is the price of
-being able to exceed RAM, not a property of the index; the
+\emph{Decomposition.} The index arithmetic by itself costs 23\,ns at $d{=}13$ (first row, where the ranks are computed and nothing is read). A query against the array in anonymous memory costs 78\,ns, so a query consists of the index plus one memory access of roughly 55\,ns. The file-mapped variant pays a further 20\,ns for 4\,KB pages and minor faults, which is the cost of being able to exceed RAM and has nothing to do with the index; the
 \texttt{-nohuge} controls in the artifact put the transparent-huge-page
 component at 10--12\,ns for both this structure and the flat table.
 
@@ -599,12 +551,7 @@ component at 10--12\,ns for both this structure and the flat table.
 keys is faster to query than the tapered array once both exceed cache:
 54\,ns against 78\,ns, a factor of $1.45$. The decomposition says why.
 Both structures make one memory access per query, and the flat table's
-hash costs about 2\,ns where the rank costs 23. So the honest statement of
-the latency result is that the values-only array pays its $O(d)$ index on
-top of the same single access, and against an inline-key flat table that
-is a deficit of 20--25\,ns at $d{=}10$--$13$, not an advantage. What the
-array holds against every key-storing structure is memory and
-construction. It uses $4.0\times$ less peak RSS than the flat table here,
+hash costs about 2\,ns where the rank costs 23. The values-only array therefore pays its $O(d)$ index on top of the same single access, and against an inline-key flat table that shows up as a deficit of 20--25\,ns at $d{=}10$--$13$. Where the array wins against every key-storing structure is memory and construction. It uses $4.0\times$ less peak RSS than the flat table here,
 $7.2\times$ less counting only the structures (a 143\,MB array against a
 1024\,MB table), $5.7\times$ less than \texttt{unordered\_map}, and the
 gap widens without bound in $N$ (\S\ref{sec:scaling}). It builds
@@ -615,15 +562,12 @@ its keys.
 \emph{The chained hash.} \texttt{std::unordered\_map} pays at least two
 dependent memory accesses plus a $d$-tuple hash. The array beats it by
 $2.7\times$ here and by $1.1$--$1.8\times$ on the server
-(\S\ref{sec:scaling}). We keep it in the table because it is the container
-an engineer reaches for first, and we keep the flat table because it is
-the one a careful reader would ask for.
+(\S\ref{sec:scaling}). We keep it in the table because it is the container most people reach for first; we added the flat table because it is the comparison we would have asked for as reviewers.
 
 \emph{The original index.} The table-free rank matches the node-count
-index of \cite{biswas2015} on query latency (the small residual reflects
-the pinned sub-range's better locality, not the method) while dispensing
+index of \cite{biswas2015} on query latency (the small residual comes from the pinned sub-range's better locality rather than from the method) while dispensing
 with its per-instance preprocessing and its pinned-coordinate restriction.
-The gain there is in construction and generality, not query speed.
+The gain over the original is in construction and generality; query speed is a wash.
 
 \begin{table}[ht]
 \caption{Desktop sweep at fixed $d{=}10$, 2M queries: query latency (ns)
@@ -647,10 +591,9 @@ Table~\ref{tab:desksweep} adds a cache-band observation. At $N{=}1.14$M
 the $4.6$\,MB array fits this machine's 8\,MB L3 while the 32\,MB flat
 table does not, and the array is then $1.6\times$ faster. Being
 $7\times$ smaller is a latency advantage wherever it moves the structure
-up one level of the memory hierarchy. We report this as a band, not a
-headline; past it, the flat table's 20--25\,ns edge is the steady state.
+up one level of the memory hierarchy. This is a band rather than a headline. Past it the flat table's 20--25\,ns edge is the steady state.
 
-We deliberately do not report a spatial-index baseline. A $k$-d tree or
+We do not report a spatial-index baseline. A $k$-d tree or
 similar structure answers \emph{nearest-neighbour} queries, which is a
 strictly harder problem than the one we face: because the grid is a
 product of per-coordinate spacings, the nearest gridpoint is obtained in
@@ -678,9 +621,8 @@ $N$ & tapered ns & hash ns & lat.\ ratio & tapered RSS & hash RSS \\
 \end{tabular}
 \end{table}
 
-The \textbf{memory ratio grows monotonically and without bound}: it
-rises from $5.7\times$ to $10.2\times$ over this range, and is unbounded in
-principle, since the array carries no keys. \textbf{Query latency} against the chained map is a subtler story. At fixed $d$ the tapered cost is a single $O(d)$ computation plus one memory access and stays essentially flat in $N$ ($99\!\to\!154$\,ns), while the chained map grows ($111\!\to\!283$\,ns) as it becomes DRAM-bound, so the ratio widens with $N$ at fixed $d$ (to $1.8\times$ here). The inline-key flat table of Table~\ref{tab:headtohead} was measured only on the desktop; since it also makes one access per query at any $N$, its latency should track the array's less the index cost at every point of this sweep, and its footprint of about 24 bytes per entry at load $0.66$ would sit $4$--$7\times$ above the array's throughout. The absolute ratio is machine-dependent
+The memory ratio grows monotonically and without bound: it rises from $5.7\times$ to $10.2\times$ over this range, and is unbounded in
+principle, since the array carries no keys. Query latency against the chained map is a subtler story. At fixed $d$ the tapered cost is a single $O(d)$ computation plus one memory access and stays essentially flat in $N$ ($99\!\to\!154$\,ns), while the chained map grows ($111\!\to\!283$\,ns) as it becomes DRAM-bound, so the ratio widens with $N$ at fixed $d$ (to $1.8\times$ here). The inline-key flat table of Table~\ref{tab:headtohead} was measured only on the desktop; since it also makes one access per query at any $N$, its latency should track the array's less the index cost at every point of this sweep, and its footprint of about 24 bytes per entry at load $0.66$ would sit $4$--$7\times$ above the array's throughout. The absolute ratio is machine-dependent
 ($1.1$--$1.8\times$ across our two platforms) and noisy on this shared box
 (tapered latency showed $20$--$30\%$ run-to-run variance under a concurrent
 tenant; reported as the median of 3 runs, hash single runs). The hash never
@@ -696,23 +638,18 @@ A full-file scan verified \emph{every} payload (0 mismatches) at 28\,M entries/s
 random-access rate, with arguments implicit by index. Random point
 queries (20{,}000, \texttt{mmap} + \texttt{madvise(RANDOM)}): mean
 17.0\,ms, p50 15.5\,ms, p90 25.1\,ms; 89.8\% of queries went to disk with
-mean 18.9\,ms, the signature of exactly one seek per query. The $O(d)$ index arithmetic contributes nothing measurable, and there is
-never a second dependent access. For contrast, the chained map's measured 43.5\,B/entry footprint would require $\approx$242\,GB of RAM at this $N$ ($15\times$ the machine), and the inline-key flat table at its measured 24\,B/entry would need $\approx$134\,GB ($8\times$); an on-disk chained layout would pay $\ge2$ dependent seeks per query on a $4.5\times$ larger file (hence a $\sim4.5\times$ smaller cached fraction), and an on-disk flat table would pay one seek on a $6\times$ larger file. In this regime the values-only array is not just faster. It is the only one of the structures that can exist at all.
+mean 18.9\,ms, which is what one seek per query looks like. The $O(d)$ index arithmetic does not register, and there is no second dependent access. For contrast, the chained map's measured 43.5\,B/entry footprint would require $\approx$242\,GB of RAM at this $N$ ($15\times$ the machine), and the inline-key flat table at its measured 24\,B/entry would need $\approx$134\,GB ($8\times$); an on-disk chained layout would pay $\ge2$ dependent seeks per query on a $4.5\times$ larger file (hence a $\sim4.5\times$ smaller cached fraction), and an on-disk flat table would pay one seek on a $6\times$ larger file. In this regime the comparison is no longer about speed: the values-only array is the only one of the three that can be built.
 
 On the server's enterprise NVMe (same query protocol, $N{=}1.12$B,
-$4.48$\,GB file, pages evicted via \texttt{posix\_fadvise(DONTNEED)}), a
-cold random query costs \textbf{p50 67\,\textmu s, mean 71\,\textmu s};
+$4.48$\,GB file, pages evicted via \texttt{posix\_fadvise(DONTNEED)}), a cold random query costs p50 67\,\textmu s, mean 71\,\textmu s;
 an immediate warm re-run collapses to $\approx$1\,\textmu s
-($\approx$70$\times$), confirming the cold pages were genuinely
-disk-resident. Against the HDD's 15.5\,ms p50 this is a
-$\mathbf{\approx\!230\times}$ media speedup for the identical
+($\approx$70$\times$), confirming that the cold pages really were on disk. Against the HDD's 15.5\,ms p50 this is a roughly $230\times$ media speedup for the identical
 one-access-per-query structure. Combining with
 \S\ref{sec:parallel}--\S\ref{sec:scaling} yields a clean three-tier
 first-touch latency hierarchy at $N\!\sim\!10^9$: resident array
 $\approx$100--280\,ns; page-cache-resident file, fresh \texttt{mmap}
-(minor fault only) $\approx$1\,\textmu s; evicted, genuine NVMe read
-$\approx$67--85\,\textmu s. Each tier is exactly one access; the taper's
-$O(d)$ arithmetic is never the bottleneck.
+(minor fault only) $\approx$1\,\textmu s; evicted, true NVMe read
+$\approx$67--85\,\textmu s. Each tier is one access, and the taper's $O(d)$ arithmetic is never the bottleneck.
 
 \paragraph{Locality under a perturbation workload.}
 Lemma~\ref{lem:prefix} predicts that queries which differ in a tail
@@ -721,11 +658,9 @@ coordinate do not, while a hash-addressed layout scatters both. We tested
 this on the same 22.27\,GB file with a random walk in key space: from a
 random sorted key, each step changes one coordinate, chosen uniformly, by
 $\pm1$ subject to monotonicity, for 20{,}000 steps. The same walk was
-addressed two ways, by the lexicographic rank and by a 64-bit mix of the
-key, which is what any hash-addressed layout does. The file's pages were
+addressed two ways, by the lexicographic rank and by a 64-bit mix of the key, as any hash-addressed layout would. The file's pages were
 evicted before each run (0.00\% resident, checked with \texttt{mincore}),
-and a hit was decided by \texttt{mincore} on the target page \emph{before}
-the access, not by timing. Table~\ref{tab:walk} gives the result.
+and a hit was decided by calling \texttt{mincore} on the target page before the access rather than by timing it. Table~\ref{tab:walk} gives the result.
 
 \begin{table}[ht]
 \caption{Random-walk queries on the 22.27\,GB out-of-core file, 20{,}000
@@ -748,7 +683,7 @@ hashed same page \% & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\
 \end{tabular}
 \end{table}
 
-The per-coordinate rows are the lemma made visible. Under lexicographic
+The per-coordinate rows show the lemma directly. Under lexicographic
 addressing a step in any of the last four coordinates stays on the same
 4\,KB page at least 92\% of the time, a step in coordinate 11 about
 three-fifths of the time, and a step in the leading eight coordinates
@@ -759,11 +694,7 @@ consecutive steps ever share a page. Overall the walk hit the cache
 $6\times$ more often (40\% against 7\%), touched $1.6\times$ fewer
 distinct pages, and finished in half the wall-clock time. The misses were
 cheaper as well, 4.0--6.6\,ms against 8.8\,ms, because nearby pages on a
-rotational disk mean shorter seeks. None of this needs the workload to be
-special: the walk perturbs every coordinate equally often. It needs only
-that the tail coordinates, which the taper resolves most coarsely and
-which matter least to $f$, are the ones written into the low-order digits
-of the address.
+rotational disk mean shorter seeks. The workload is not doing any of this work; the walk perturbs every coordinate equally often. What does the work is the addressing, which writes the tail coordinates, the ones the taper resolves most coarsely and which matter least to $f$, into the low-order digits.
 
 \subsection{Parallel construction via unranking}\label{sec:parallel}
 On a 128-thread dual-EPYC server we fill tables of
@@ -792,8 +723,7 @@ $T$ & \texttt{flat} entries/s & \texttt{unrank} entries/s & \texttt{unrank} spee
 The \texttt{flat} fill is already memory-bandwidth-bound at a single thread
 ($\approx$5\,GB/s of sequential stores), so extra threads barely help; the
 realistic \texttt{unrank} variant is compute-bound at low $T$ and scales to
-$\approx$4.1$\times$ by $T{=}64$, at which point it converges onto the same $\approx$9.5e8 entries/s ceiling as \texttt{flat}. Enough threads fully hide the $O(d)$ reconstruction behind the bandwidth wall. The
-honest ceiling on this two-socket box is DRAM bandwidth, not thread count.
+$\approx$4.1$\times$ by $T{=}64$, at which point it converges onto the same $\approx$9.5e8 entries/s ceiling as \texttt{flat}. Enough threads fully hide the $O(d)$ reconstruction behind the bandwidth wall. The ceiling on this two-socket box is DRAM bandwidth rather than thread count.
 Peak RSS was $3.8$ bytes/entry (the 4-byte payload; \emph{no} per-entry key
 overhead).
 
@@ -802,9 +732,7 @@ $N{=}1.12$B content in $234$\,s using $43.1$\,GB; the fair parallel hash
 (16 shard-maps, 16 threads, per-shard mutex) manages only $200$\,s, a $1.17\times$ speedup, with lock and node-allocation contention dominating. The
 flat array builds the same content in $0.9$\,s (trivial payload, $T{=}1$) to
 $4.9$\,s (argument-reconstructing \texttt{unrank}, $T{=}1$), and in
-$1.2$\,s at $T{=}64$: a $\mathbf{48}$--$\mathbf{250\times}$ build-time
-advantage. Its peak RSS is $4.2$\,GB against the hash's $43.1$\,GB, a
-$\mathbf{10.2\times}$ memory advantage. Both are build-only peaks, so they sit slightly below the build-plus-query peaks of Table~\ref{tab:scaling}, which are $4.66$\,GB and $45.8$\,GB at the same $N$ and give $9.8\times$. The widest ratio we measure, $10.2\times$, is the $N{=}1.92$B row of that table.
+$1.2$\,s at $T{=}64$: a $48$--$250\times$ build-time advantage. Its peak RSS is $4.2$\,GB against the hash's $43.1$\,GB, a $10.2\times$ memory advantage. Both are build-only peaks, so they sit slightly below the build-plus-query peaks of Table~\ref{tab:scaling}, which are $4.66$\,GB and $45.8$\,GB at the same $N$ and give $9.8\times$. The widest ratio we measure, $10.2\times$, is the $N{=}1.92$B row of that table.
 The memory gap is wider than the $5.7\times$ seen at
 desktop scale because the hash's fixed per-entry overhead grows with $N$.
 
@@ -847,7 +775,7 @@ Exact evaluation costs $3.8$\,\textmu s (Newton) or $28$\,\textmu s
 $25$--$55\times$ speedup over Newton and up to $406\times$ over bisection, against the $\approx$10$\times$ reported in \cite{biswas2015}.
 Accuracy saturates near $2.6\cdot10^{-3}$ mean absolute error (the
 interpolation floor for nearest-grid rounding; \cite{biswas2015}'s
-credit-weighted variant reaches $\approx$$10^{-3}$). The \textbf{measured bias is $0.30$--$0.47\times$ the mean absolute error} on the three finer grids, and an order smaller still for the smoother $f$ of \S\ref{sec:app-entmax}. On the coarsest grid ($B{=}12$, $d{=}8$) it is $0.99\times$, because the $\delta^{2}$ regime has not yet been entered. This is the empirical counterpart of Lemma~\ref{lem:bias} and
+credit-weighted variant reaches $\approx$$10^{-3}$). The measured bias is $0.30$--$0.47\times$ the mean absolute error on the three finer grids, and an order smaller still for the smoother $f$ of \S\ref{sec:app-entmax}. On the coarsest grid ($B{=}12$, $d{=}8$) it is $0.99\times$, because the $\delta^{2}$ regime has not yet been entered. This is the empirical counterpart of Lemma~\ref{lem:bias} and
 what licenses the aggregate use case.
 
 \subsection{\texorpdfstring{$\alpha$-entmax thresholds: where it does \emph{not}}{alpha-entmax thresholds: where it does not}}
@@ -856,27 +784,21 @@ It is equally important to report where the structure loses.
 $\alpha$-entmax \cite{peters2019} computes a threshold $\tau$ over sorted
 logits, and accelerating it is the subject of AdaSplash
 \cite{goncalves2025}; it is evaluated per row$\times$head$\times$layer
-$\times$token, and its domain looks ideal, since entries below $\tau$ have exactly zero influence, so the tapered tail is exact and not approximate. Our test set is $199{,}741$ pre-softmax attention rows sampled
+$\times$token, and its domain looks ideal, since entries below $\tau$ have zero influence, so the tapered tail is exact. Our test set is $199{,}741$ pre-softmax attention rows sampled
 uniformly over (layer, head, position) from GPT-2 small run on
 WikiText-2 (raw), keeping each row's top-$32$ sorted scores; on these the
 memo table is accurate ($\tau$ error $3.8\cdot10^{-3}$ mean, bias only
-$0.005\times$ that) but \textbf{loses on speed}: $92$\,ns versus
-$\mathbf{35}$\,\textbf{ns} for the exact solver.
+$0.005\times$ that) but loses on speed: $92$\,ns against $35$\,ns for the exact solver.
 
-The reason is worth spelling out. For $\alpha{=}1.5$ the threshold has a closed
+The reason is the size of the support. For $\alpha{=}1.5$ the threshold has a closed
 form over the \emph{active support}, and on real attention rows that support is tiny: median $2$, mean $4.0$, with only $0.88\%$ of rows
 reaching the top-32 window. An $O(\text{support})$ closed form cannot be
 beaten by an $O(d)$ interpolation plus an $O(d)$ rank plus a memory access.
 (The memo table does beat a naive $60$-iteration bisection by $6.4\times$,
 but no one should use that.) We note this because a widely quoted
-$37.6$\,\textmu s/row figure for single-row \texttt{entmax15} reflects
-Python/tensor per-call overhead, not the intrinsic cost: the same
-mathematics in C++ is $35$\,ns.
+$37.6$\,\textmu s/row figure for single-row \texttt{entmax15} reflects Python and tensor per-call overhead; the same mathematics in C++ takes $35$\,ns.
 
-\paragraph{Scoping rule.} Memoize when exact evaluation is genuinely
-\emph{iterative and transcendental} (Plackett--Luce: $3.8$\,\textmu s), not
-merely ``a solve'' (entmax: $35$\,ns). Sortedness, rank-decaying influence,
-and an exact tail are necessary but \emph{not sufficient}; the exact
+\paragraph{Scoping rule.} Memoize when the exact evaluation is iterative and transcendental, as for Plackett--Luce at $3.8$\,\textmu s, and not when it is merely ``a solve'', as for entmax at $35$\,ns. Sortedness, rank-decaying influence and an exact tail are necessary but not sufficient; the exact
 baseline must itself be expensive.
 
 %% =======================================================================
@@ -903,8 +825,7 @@ randomized construction and no order or inverse. Minimal perfect hashing
 carries $\Omega(N)$-bit description lower bounds
 \cite{fredman1984,mehlhorn1982}, with tight bounds known for monotone
 variants \cite{belazzougui2009,assadi2023} and $\Theta(N\log N)$ for
-arbitrary prescribed orders \cite{fox1991}. Our key set escapes these
-because it is one parameterized family, not an arbitrary subset.
+arbitrary prescribed orders \cite{fox1991}. Our key set escapes these bounds because it is a single parameterized family rather than an arbitrary subset.
 
 \paragraph{Grids for functions with decaying coordinate importance.}
 Sparse grids \cite{bungartz2004}, and their dimension-adaptive \cite{gerstner2003} and anisotropic \cite{nobile2008,nobile2016} variants, allocate resolution per dimension according to importance. Griebel and Knapek \cite{griebel2000} determine optimal approximation spaces from a ratio of smoothness exponents, together with a penalty for
@@ -917,8 +838,7 @@ is the classical weighted-space and tractability theory
 \cite{sloan1998,novak2008,gnewuch2011}, with matching $N$-term results for
 anisotropic analytic classes \cite{cohen2011} and the $\log^2(1/\eps)$
 entropy regime going back to Kolmogorov and Tikhomirov
-\cite{kolmogorov1959}. We exploit this regime rather than extend it; note
-also that symmetry alone does not deliver dimension-independence \cite{weimar2014}. The decay does.
+\cite{kolmogorov1959}. We use this regime and do not extend it. Symmetry alone does not give dimension-independence \cite{weimar2014}; the decay does.
 
 \paragraph{Balancing competing geometric rates.} The phenomenon behind
 Theorem~\ref{thm:penalty} is classical: a geometric schedule must match a
@@ -928,35 +848,29 @@ of transform coding \cite{huang1963,berger1971,gersho1992}, and it appears
 sharply in rational approximation, where the achievable exponent is the
 minimum of two competing rates and is maximized when they coincide
 \cite{gopal2019,xiang2023}; exponential-sum \cite{braess2005} and
-$hp$-refinement analyses have the same structure. Our contribution is a
-closed form at finite $\eps$ for this construction, not the effect.
+$hp$-refinement analyses have the same structure. Our contribution is a closed form at finite $\eps$ for this construction; the effect itself is not new.
 
 \paragraph{Approximating softmax-family transforms.} The
 $\alpha$-entmax transform \cite{peters2019} and its sparse-attention
 descendants \cite{goncalves2025} motivate our second application; adaptive truncation
 schemes for decoding \cite{nguyen2025} share the sorted-logit domain.
 Lookup-table approximation of softmax is well established in inference
-hardware, but for scalar transforms rather than the vector-argument,
-monotone, tapered setting considered here. Our finding for this family is
-negative and, we think, useful: when the exact solver is itself
+hardware, but for scalar transforms, whereas the setting here has a vector argument, monotone and tapered. Our finding for this family is negative, and we think useful: when the exact solver is itself
 $O(\text{support})$, tabulation does not pay.
 
 %% =======================================================================
 \section{Conclusion}\label{sec:conclusion}
 A memo table for a function of a sorted argument need not store its keys,
-and the version that does not is smaller, faster to build, and operable at
-sizes where the alternatives cannot be constructed at all.
+and the version that does not is smaller, faster to build, and usable at sizes where the alternatives cannot be constructed.
 Recognizing the tapered memoization grid of \cite{biswas2015} as an
 instance of the combinatorial number system turns its index into a
 closed-form $O(d)$ computation, removes its preprocessing tables, extends
 it to variable per-depth alphabets, and, most importantly, supplies the inverse it lacked. With unranking available the keys need never be
 stored, and the memo table becomes a flat array of values addressed by
-content. We set out to measure the practical effects, and they are these. The footprint is a factor $5.7$--$10.2\times$ below a chained hash memo and $4$--$7\times$ below an inline-key flat table, and both factors widen with $N$. On query latency the array beats the chained map and loses to the flat table by the cost of its own index, about 23\,ns at $d{=}13$; we regard that as the fair price of storing no keys, and we have measured rather than estimated it. The table is built by 64 threads without a single lock, at the machine's memory-bandwidth limit, where a sharded hash manages $1.17\times$. And at $22$\,GB on a $16$\,GB desktop it answers each query in exactly one disk access, at a size where no key-storing container can be constructed at all.
+content. We set out to measure the practical effects, and they are these. The footprint is a factor $5.7$--$10.2\times$ below a chained hash memo and $4$--$7\times$ below an inline-key flat table, and both factors widen with $N$. On query latency the array beats the chained map and loses to the flat table by the cost of its own index, about 23\,ns at $d{=}13$; that is the price of storing no keys, and we have measured it instead of estimating it. The table is built by 64 threads without a single lock, at the machine's memory-bandwidth limit, where a sharded hash manages $1.17\times$. And at $22$\,GB on a $16$\,GB desktop it answers each query in exactly one disk access, at a size where no key-storing container can be constructed at all.
 
 The applications set the limits of the claim as well as supporting it. Memoizing the Plackett--Luce normalization, an iterative transcendental solve, is $25$--$55\times$ faster than Newton's method, beyond the
-$\approx$$10\times$ originally reported. Memoizing the $\alpha$-entmax
-threshold is \emph{slower} than solving it exactly, because its active
-support is tiny. The lesson we would keep is that a sorted argument with
+$\approx$$10\times$ originally reported. Memoizing the $\alpha$-entmax threshold is slower than solving it exactly, because its active support is tiny. The lesson is that a sorted argument with
 rank-decaying influence and an exact tail is not sufficient reason to
 tabulate: the exact evaluation must itself be expensive.
 
