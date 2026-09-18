@@ -296,3 +296,24 @@ Per-coordinate hit% (lex, seed 42): coords 1–8 ≈ 10–13%; 9: 18%; 10: 34%;
 92 / 98 / 100 / 100. Hashed: flat 5–8% everywhere, same-page 0.
 Misses are cheaper under lex too (shorter seeks on the HDD). All checksums
 CORRECT.
+
+## MEDIAN-OF-3 RERUN ON AN IDLE MACHINE (2026-09-18, `results_median3.txt`)
+
+Load 0.7 at start, no other heavy process. Three full repetitions of the in-RAM
+suite; the paper's Tables 2–3 now carry these medians. Spread (min–max) ≤4% for
+every row except `unordered_map` (7%). All checksums agree across modes
+(`tabled` differs by design: pinned first coordinate).
+
+| B=16 d=13, 3M q | median ns | min–max | RSS MB | build s |
+|---|---|---|---|---|
+| rankonly | 22.6 | 22.5–23.0 | — | — |
+| tapered-ram | 81.3 | 79.8–82.0 | 294 | 0.04 |
+| tapered (mmap) | 98.3 | 95.4–99.8 | 294 | 1.20 |
+| tabled (pinned) | 81.0 | 80.4–86.1 | 294 | 1.34 |
+| oahash | 53.9 | 53.5–55.0 | 1175 | 4.28 |
+| unordered_map | 285.7 | 269.7–288.3 | 1675 | 6.99 |
+
+d=10 sweep (tapered-ram / oahash / umap, ns): 92K 19.7/23.5/39.0 · 1.14M
+25.2/43.5/131.5 · 8.44M 63.0/51.0/164.8 · 44.4M 76.9/55.3/185.9. Derived:
+flat table 1.5× faster than array at 37M; array 2.9× faster than umap; index
+= 23 ns; deficit vs flat 12–27 ns; cache band at 1.14M array 1.7× faster.
