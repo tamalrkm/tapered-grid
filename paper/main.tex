@@ -25,6 +25,8 @@
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{booktabs}
 \usepackage{graphicx}
+%% Works whether the figures sit in figs/ or beside main.tex (flat zip).
+\graphicspath{{figs/}{./}}
 %% SP&E asks for Times, Helvetica or Courier; newtx gives Times text+math.
 \usepackage{newtxtext,newtxmath}
 \usepackage{xcolor}
@@ -584,7 +586,7 @@ $N$ & \multicolumn{2}{c}{tapered} & \multicolumn{2}{c}{flat table} & \multicolum
 \end{table}
 \begin{figure}[ht]
 \centering
-\includegraphics[width=\linewidth]{figs/scaling.pdf}
+\includegraphics[width=\linewidth]{scaling.pdf}
 \caption{Query latency (left) and peak RSS (right) against $N$ at fixed
 $d{=}10$. Solid lines: desktop, array in RAM, median of three runs; the
 RSS floor of about 80\,MB is the query buffer. Dotted lines: the server
@@ -687,7 +689,7 @@ hashed same page \% & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\
 
 \begin{figure}[ht]
 \centering
-\includegraphics[width=.8\linewidth]{figs/locality.pdf}
+\includegraphics[width=.8\linewidth]{locality.pdf}
 \caption{Page-cache hit rate of each random-walk step on the 22.27\,GB
 out-of-core file, by the coordinate the step changed, for the same walk
 addressed lexicographically and by a hash of the key. Cold cache at the
