@@ -13,7 +13,7 @@ def med(mode,d):
         if mo==mode and dd==d and len(v)>0:
             pts.append((v[0][2],statistics.median(x[0] for x in v),statistics.median(x[1] for x in v),len(v)))
     return sorted(pts)
-plt.rcParams.update({'font.size':9,'font.family':'serif'})
+plt.rcParams.update({'font.size':9,'font.family':'serif','font.serif':['Nimbus Roman','Liberation Serif'],'mathtext.fontset':'stix','axes.unicode_minus':False})
 fig,(a1,a2)=plt.subplots(1,2,figsize=(6.4,2.7))
 series=[('tapered-ram','values-only array','-o'),('oahash','open-addressing flat table','-s'),('hash','std::unordered\\_map'.replace('\\_','_'),'-^')]
 for mode,lab,st in series:
