@@ -150,6 +150,14 @@ A.~N. Kolmogorov, V.~M. Tikhomirov, $\varepsilon$-entropy and
 W.~R. Bennett, Spectra of quantized signals, Bell System Technical Journal
   27~(3) (1948) 446--472.
 
+\bibitem{artifact2026}
+T.~Maharaj, \href{https://doi.org/10.5281/zenodo.21675851}{Tapered grid:
+  reference implementation, benchmark code, and raw measurement logs}, software
+  and data artifact; concept DOI resolves to the latest release (2026).
+\newblock \href {https://doi.org/10.5281/zenodo.21675851}
+  {\path{doi:10.5281/zenodo.21675851}}.
+\newline\urlprefix\url{https://doi.org/10.5281/zenodo.21675851}
+
 \bibitem{genitrini2021}
 A.~Genitrini, M.~P{\'e}pin, Lexicographic unranking of combinations revisited,
   Algorithms 14~(3) (2021) 97.

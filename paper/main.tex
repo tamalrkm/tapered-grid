@@ -96,6 +96,23 @@ ranking and unranking \sep external memory \sep memory-mapped I/O
 
 \end{frontmatter}
 
+%% ---- Practitioner Points (SP&E: at most three, practitioner-facing) ----
+\section*{Practitioner Points}
+\begin{itemize}
+\item When a lookup table's keys are fixed in advance by the shape of the
+grid, storing them is waste. Computing each array address arithmetically
+from the argument removes the keys entirely and shrinks the table by four
+to ten times, with the factor growing as the table grows.
+\item The same addressing lets any number of threads fill the table with
+no locks, and lets it be memory-mapped and served from a file larger than
+RAM at one disk access per query, at sizes where a key-storing container
+cannot be built at all.
+\item Tabulation only pays when the exact computation is genuinely
+expensive. Memoizing an iterative transcendental solve was 25 to 55 times
+faster; memoizing a threshold that has a short closed form was slower than
+computing it.
+\end{itemize}
+
 %% =======================================================================
 \section{Introduction}\label{sec:intro}
 
@@ -500,8 +517,8 @@ The proof is in \ref{app:bias}.
 \emph{Hardware.} Desktop: Intel Xeon E3-1245 v6 (4 cores, 8 threads, 3.7\,GHz), 16\,GB RAM, 1\,TB 7200\,rpm SATA HDD, Linux 6.8. This machine provides the out-of-core setting, in which the 16\,GB of RAM is the constraint of interest. Server: dual AMD EPYC 9335 (128 threads), 499\,GB RAM, enterprise NVMe, g++ 13.3. The server provides the in-RAM scaling, parallel-build and NVMe settings. All code, build scripts,
 raw measurement logs, and the script that regenerates the $\alpha$-entmax
 attention-row dataset from scratch are available at
-\url{https://github.com/tamalrkm/tapered-grid}, archived at
-\url{https://doi.org/10.5281/zenodo.21675851}.
+\url{https://github.com/tamalrkm/tapered-grid} and permanently archived
+with a DOI \cite{artifact2026}.
 
 \subsection{Correctness}
 Every index claim in this paper was checked against brute-force
@@ -1024,8 +1041,24 @@ not been, an editor or editorial board member of this journal.
 measurement logs, and the script that regenerates the $\alpha$-entmax
 attention-row dataset are publicly available at
 \url{https://github.com/tamalrkm/tapered-grid} under the MIT licence, and
-permanently archived at \url{https://doi.org/10.5281/zenodo.21675851}
-(concept DOI; resolves to the latest release).
+permanently archived on Zenodo with the concept DOI
+\texttt{10.5281/zenodo.21675851}, which resolves to the latest release
+\cite{artifact2026}. The scripts that generate every figure, table and
+reported measurement are included in that archive.
+
+\medskip\noindent\textbf{Ethics approval.} Not applicable. This research
+involved no human participants, no animal subjects, and no personal data.
+
+\medskip\noindent\textbf{Patient consent.} Not applicable.
+
+\medskip\noindent\textbf{Clinical trial registration.} Not applicable.
+
+\medskip\noindent\textbf{Permission to reproduce material from other
+sources.} Not applicable. All figures and tables are the author's own and
+have not been published elsewhere. The attention-row dataset of
+\S\ref{sec:app-entmax} is derived from the publicly available WikiText-2
+corpus and the GPT-2 model, and is regenerated from scratch by a script in
+the artifact rather than redistributed.
 
 \medskip\noindent\textbf{Use of generative AI and AI-assisted technologies.}
 During the preparation of this work the author used Claude (Anthropic),
