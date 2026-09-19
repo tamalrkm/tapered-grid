@@ -1,4 +1,4 @@
-%% Tapered-grid follow-up paper — The Computer Journal (OUP)
+%% Tapered-grid follow-up paper — Software: Practice and Experience (Wiley)
 %% Venue history: TCS desk-rejected 2026-07 ("too experimental"); auto-transfer
 %% to Information and Computation withdrawn (I&C is more theoretical still);
 %% Algorithmica desk-rejected 2026-09 (editorial bar, no referee reports).
@@ -6,10 +6,13 @@
 %% hence the move to an engineering-facing journal. Front matter reframed
 %% 2026-09-02 to lead with the artifact and the measurements rather than with
 %% the combinatorial-number-system identification.
-%% Still typeset in elsarticle: TCJ accepts "postscript, LaTeX, PDF or Word"
-%% at submission; the OUP comjnl template (Contemporary Large design) is
-%% preferred but not required, and would be applied at revision.
-%% elsarticle [preprint] is already single-column, as OUP asks.
+%% Still typeset in elsarticle: SP&E asks LaTeX authors for a SINGLE PDF at
+%% initial submission (source files only at revision), so no template
+%% conversion is needed now. SP&E style: 12pt, single-column, single-spaced,
+%% Times/Helvetica/Courier preferred -- hence newtxtext/newtxmath below.
+%% Reference style at revision is AMA (numbered, superscript); we are
+%% elsarticle-num (numbered, bracketed), converted if accepted.
+%% Hard limits: abstract <= 250 words, <= 6 keywords, <= 40 pages.
 %% Compile: pdflatex main; bibtex main; pdflatex main x2
 %% Engine: pdfLaTeX (also builds under XeLaTeX). Do NOT use LuaLaTeX --
 %% arXiv's AutoTeX does not support it. No fontspec/unicode-math is used,
@@ -22,6 +25,8 @@
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{booktabs}
 \usepackage{graphicx}
+%% SP&E asks for Times, Helvetica or Courier; newtx gives Times text+math.
+\usepackage{newtxtext,newtxmath}
 \usepackage{xcolor}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
@@ -33,7 +38,7 @@
 %% errors out on bitmap PK fonts); protrusion alone does the work here.
 \usepackage[protrusion=true,expansion=false]{microtype}
 
-\journal{The Computer Journal}
+\journal{Software: Practice and Experience}
 
 %% ---- theorem environments ---------------------------------------------
 \newtheorem{theorem}{Theorem}
@@ -59,24 +64,32 @@ Educational and Research Institute (RKMVERI), Belur, West Bengal, India}
 
 \begin{abstract}
 Memoizing an expensive function of a sorted score vector is a
-data-structure problem before it is a numerical one. At a billion
+data-structure problem before it is a numerical one: at a billion
 gridpoints, a hash map or a search tree spends most of its space on keys
-that the grid already fixes. We describe a memo table that does not store keys. The address of an entry is computed from the sorted argument
-itself, in closed form, in $O(d)$ arithmetic, so $N$ values occupy exactly
-$N$ slots. The argument can be recovered from a bare index, and the table
-can be memory-mapped and read from a file larger than RAM. Against a chained hash map the structure uses $5.7\times$ less memory at $N=37.4$M and $10.2\times$ less at $N=1.9$B, answers queries $1.1$--$2.9\times$ faster, and builds $48$--$250\times$ faster; on 64 threads its construction needs no coordination, where a sharded hash gains a factor of only $1.17$. Against the strongest simple baseline, an open-addressing table with inline keys, it is $4$--$7\times$ smaller and $100\times$ faster to build but $1.5\times$ slower to query, and the difference is the $O(d)$ index arithmetic, which we measure separately.
-At $22$\,GB on a $16$\,GB desktop it serves each query in one disk access, a
-size at which no key-storing container can be built. The closed form exists because the key set of the tapered grid of Biswas and Regan (TCS~2015) is the set of multiset combinations,
-so its index is the classical combinatorial number system. Once this is stated, the preprocessing tables of the original scheme become unnecessary and an $O(d)$ unranking becomes available, and the unranking is the step that lets keys be dropped and the table be filled in any order. We also give a finite-$\eps$
-closed form for the cost of a mistuned taper, and two applications.
-Memoizing the Plackett--Luce normalization runs $25$--$55\times$ faster
-than Newton's method. Memoizing $\alpha$-entmax thresholds does not pay, and the contrast between the two cases yields a rule for when a structure of this kind is worthwhile.
+the grid already determines. We describe an implemented memo table that stores
+none. An entry's address is computed in closed form from the sorted
+argument itself, so $N$ values occupy $N$ slots, the argument is
+recoverable from the index, and the table can be memory-mapped and served
+from a file larger than RAM. Against a chained hash map it uses
+$5.7\times$ less memory at $37$M entries and $10.2\times$ less at
+$1.9$B, answers queries up to $2.9\times$ faster and builds up to
+$250\times$ faster; on 64 threads its construction needs no coordination;
+a sharded hash gains only $1.17\times$. Against an open-addressing
+table with inline keys it is $4$--$7\times$ smaller and $100\times$
+faster to build but $1.5\times$ slower to query, a deficit we trace to
+the $O(d)$ index arithmetic. At $22$\,GB on a
+$16$\,GB desktop it serves each query in one disk access, where no
+key-storing container can be built; and its order-preserving addressing keeps a
+perturbation workload on the same pages that a hashed layout scatters. The closed form exists because the key set is the
+multiset combinations, whose index is the combinatorial number system.
+Memoizing Plackett--Luce normalization runs $25$--$55\times$ faster than
+Newton's method; memoizing $\alpha$-entmax thresholds does not pay. The
+contrast says when this structure is worthwhile.
 \end{abstract}
 
 \begin{keyword}
 memoization \sep algorithm engineering \sep experimental evaluation \sep
-combinatorial number system \sep ranking and unranking \sep succinct data
-structures \sep external memory \sep memory-mapped I/O \sep Plackett--Luce
+ranking and unranking \sep external memory \sep memory-mapped I/O
 \end{keyword}
 
 \end{frontmatter}
