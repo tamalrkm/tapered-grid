@@ -1,115 +1,124 @@
-# Tapered Grid — table-free indexing for memoization grids
+# tapered-grid: memo tables without keys
 
-Research artifact for *Memoization Without Keys: Compact, Out-of-Core Tables
-for Functions of Sorted Arguments*.
+A header-only C++17 memo table for functions of a sorted argument. It stores
+values only: the address of an entry is the lexicographic rank of its sorted
+argument, computed in O(d) from one shared Pascal table. This repository is the
+artifact of *Memoization Without Keys: Compact, Out-of-Core Tables for Functions
+of Sorted Arguments* (Software: Practice and Experience, under review). It holds
+the library, its tests, every benchmark, the raw logs behind every measured
+number in the paper, and the scripts that turn those logs into the paper's
+numbers, tables and figures.
 
-This is a follow-up to Biswas & Regan, *Approximation of function evaluation
-over sequence arguments via specialized data structures*, Theoretical Computer
-Science **607** (2015) 113–123.
-
-## What this is
-
-A memoization table for functions `f(x)` of a **sorted** argument whose
-influence decays with rank. Its keys — non-decreasing vectors over a fixed
-alphabet — are exactly the combinations with repetition, so the array index is
-the lexicographic rank in the **combinatorial number system**. That gives:
-
-* a **table-free closed-form `O(d)` rank** (no per-grid preprocessing tables),
-* an **`O(d)` unrank**, so keys need never be stored and the table can be built
-  by any number of threads with zero coordination,
-* a **values-only flat array**: smaller than a hash memo by a factor that grows
-  with `N`, memory-mappable, and usable past the limits of RAM at one disk
-  access per query.
-
-## Quick start
+## Check it
 
 ```bash
-make                      # builds all C++ benchmarks (g++ -O3 -march=native)
-python3 src/refimpl.py    # exhaustive correctness: rank/unrank vs brute force
-python3 src/warped.py     # warped/selective ranker; reproduces published index 400
+make verify          # C++ unit tests, Listing 1 of the paper, Python reference checks (about 2 min)
+make check-numbers   # regenerate every number and table from results/ and diff against paper/
 ```
 
-`src/refimpl.py` is the readable reference implementation; the C++ files are the
-measured ones. Everything is self-contained apart from the α-entmax dataset
-(see below); Python needs only `numpy` (plus `scipy` for `src/spike_bench.py`).
+`make verify` needs a C++17 compiler and Python 3 with NumPy; `make check-numbers`
+needs Python 3 only. What `make verify` covers:
 
-## Reproducing the paper's claims
-
-| Claim | Command |
+| Check | Where |
 |---|---|
-| Correctness of the closed-form rank/unrank (6,426 keys, all `B≤8, d≤6`); reproduces published index **328** and file size **C(29,14)=77,558,760** | `python3 src/refimpl.py` |
-| Warped/selective ranker; reproduces published index **400** (6,501 keys + 30 random nested configs) | `python3 src/warped.py` |
-| In-RAM head-to-head and `N`-sweeps vs `std::unordered_map` **and an open-addressing flat table** (inline 64-bit keys, linear probing, load ≤ 7/8) | `./bench tapered 16 13 3000000 42`, `./bench hash 16 13 3000000 42`, `./bench oahash 16 13 3000000 42`; the `tapered-ram`, `rankonly` and `*-nohuge` modes isolate page-size/TLB effects and the bare index cost |
-| Base scheme's table-based index (pinned) for comparison | `./bench tabled 16 13 3000000 42` |
-| **Out-of-core**: 5.57e9 entries / 22.3 GB file, one seek per query | `./ooc_bench build 22 15 && ./ooc_bench scan 22 15 && ./ooc_bench query 22 15 20000 42` |
-| **Locality** (Lemma 2, prefix contiguity): random-walk queries under lexicographic vs hashed addressing, page-cache hits decided by `mincore()` | `./ooc_bench walk 22 15 20000 42 lex` and `./ooc_bench walk 22 15 20000 42 hashed` |
-| Taper-mismatch penalty, Theorem 3 (33 cells, 0.6–8% vs exact) | `python3 src/verify_penalty.py` |
-| Optimal-schedule check (`s=r`; halving optimal iff `r=½`) | `python3 src/verify_schedule.py` |
-| **Plackett–Luce application** (memo 25–55× faster than Newton) | `./pl_bench 16 12 2.0` |
-| **α-entmax application** (negative result: memo *loses* to the exact solver) | `python3 src/dump_entmax_rows.py` then `./entmax_bench 16 12 2.0` |
+| rank, unrank and the O(1) neighbour step against brute force, every key of every grid with B ≤ 8, d ≤ 6 (6,426 keys); prefix blocks contiguous with the stated length | `tests/test_tg.cpp` |
+| the one-read rank equals the two-read form, exhaustively and on random keys of large shapes | `tests/test_tg.cpp` |
+| Eq. (3) of Biswas and Regan (2015) agrees on all 2,989 pinned keys and collides off that domain (B = d = 2 counterexample) | `tests/test_tg.cpp` |
+| simplex interpolation exact on affine f; every vertex a stored key | `tests/test_tg.cpp` |
+| file round trip, payload checksum, corrupted header and wrong type rejected | `tests/test_tg.cpp` |
+| parallel fill equals sequential fill; `get_many` equals single lookups | `tests/test_tg.cpp` |
+| the code printed as Listing 1 compiles and runs | `tests/listing1.cpp` |
+| the published worked examples (indices 328 and 400), nested ranker on 6,501 keys and 30 random configurations | `src/refimpl.py`, `src/warped.py` |
+| the taper-mismatch penalty formula against the exact discrete optimum, 33 cells | `src/verify_penalty.py` |
 
-Measured outputs from the runs reported in the paper are in `RESULTS.md`
-(desktop: Xeon E3-1245 v6, 4 cores / 8 threads, 16 GB, 1 TB 7200 rpm SATA HDD)
-and `RESULTS_SERVER.md` (server: dual EPYC 9335 / 128 threads, 499 GB, NVMe,
-H200). `THEORY_PENALTY.md` contains the derivation and numerical verification behind Theorem 3 and the bias lemma.
+Two lines in the output of `warped.py`, marked `[A]`, say that the literal reading
+of Eq. (7) of the 2015 paper does not give its own index 400. That is expected; the
+`[B]` lines, the nested ranker, must pass.
 
-### Notes on two experiments
+## Use it
 
-**Out-of-core** writes a 22.3 GB file (`ooc_memo.bin`) to the working directory
-and takes ≈4 min to build plus ≈3 min to verify on a rotational disk. Delete it
-afterwards. Choose `B`/`d` so that `4·C(B+d-1,d)` comfortably exceeds your RAM —
-the point of the experiment is that the file does not fit.
+Copy `src/tg.hpp`. Listing 1 of the paper is `tests/listing1.cpp`:
 
-**α-entmax** needs `entmax_u.bin`: the scaled sorted logit gaps
-`u_i = ½(z₁ − z_i)` of real attention rows, as `float32`, 32 per row, row-major.
-The dataset is not redistributed, but it is fully regenerated by
+```cpp
+auto t = tg::Table<float>::create("root.tg", sh, meta);  // build once
+t.fill([&](const int* m, int d) { return f(m, d); }, 4); // 4 threads, no locks
+t.sync();                                                // flush, record the checksum
+
+auto memo = tg::Table<float>::open("root.tg");           // map read-only, header validated
+float v = memo.at(tg::rank(m, sh));                      // one memory access
+memo.get_many(keys, n, out);                             // n independent lookups, overlapped
+```
+
+`src/tg.hpp` provides `Shape`, `rank`, `unrank`, `step`, `next`, `prefix_block`,
+`Spacing`, `snap_nearest`, `locate`, `interp_simplex`, `check_key` and `Table<T>`
+(anonymous memory, or a file with a 4 KiB header page: magic, version, endianness
+tag, element type and size, shape, payload checksum). Limit: `B + d ≤ 68`, so that
+all binomials fit in 64 bits. Linux; no dependencies beyond POSIX `mmap`.
+
+## From logs to paper
+
+Nothing in the paper's tables or measured prose is typed by hand.
+`analysis/make_numbers.py` reads `results/<machine>/*.jsonl` and writes
+`paper/numbers.tex` (one `\def` per quoted number) and `paper/tables/*.tex`
+(table bodies). It stops with an error if any two structures disagree on the
+answers to a query stream, if a parallel build reports a verification error, or if
+an array's contents differ across thread counts. `analysis/make_figs.py` writes
+`paper/figs/*.pdf` and needs matplotlib.
 
 ```bash
-python3 src/dump_entmax_rows.py     # needs torch, transformers, datasets
+make numbers   # paper/numbers.tex, paper/tables/
+make figures   # paper/figs/
 ```
 
-which reproduces the paper's test set: 199,741 rows sampled uniformly over
-`(layer, head, position)` from GPT-2 small run on WikiText-2 (raw), 98×512
-tokens, seed 0. It hooks each layer's fused QKV projection and recomputes
-`q·kᵀ/√d_head` itself — deliberately *not* `output_attentions`, which returns
-post-softmax weights — applies the causal restriction, and keeps the top-32
-sorted scores per row. It writes `entmax_rows.npz` (full rows plus metadata)
-and `entmax_u.bin` (the gaps the C++ benchmark reads), and prints an integrity
-report. Runs on CPU in ~15 min; no GPU required.
+| In the paper | Plan (`scripts/run.py`) | Binary | Raw log |
+|---|---|---|---|
+| Table 3, headline factors | all of the below | | `results/` |
+| Table 4, head-to-head | `h2h` | `bench` | `results/{server,desktop}/h2h.jsonl` |
+| Table 5, overlap against d and batch size | `window` | `bench` | `results/{server,desktop}/window.jsonl` |
+| Table 6, Figure 1, scaling | `sweep` | `bench` | `results/{server,desktop}/sweep.jsonl` |
+| Table 7, construction; expensive payload | `parallel` | `build_parallel` | `results/server/parallel.jsonl` |
+| Table 8, Figure 2, out of core | `ooc` | `ooc_bench`, `pl_fit` (trace) | `results/{server,desktop}/ooc.jsonl` |
+| Table 9, vector-root microbenchmark, bit identity | `pl` | `pl_bench` | `results/{server,desktop}/pl.jsonl` |
+| Table 10, end-to-end fit | `plfit` | `pl_fit` | `results/{server,desktop}/plfit.jsonl` |
+| α-entmax negative result | `entmax` | `entmax_bench` | `results/server/entmax.jsonl` |
+| the default page policy, in the prose of Section 6.2 | `pages` | `bench` | `results/{server,desktop}/pages.jsonl` |
+| instructions per coordinate of the rank loops (the paper quotes the desktop build; the server's GCC 13.3 compiled the one-read loop into a longer body, 64 instructions and 18 reads per pass, presumably several coordinates at a time) | | `analysis/loopstats.py` | `results/<machine>/loopstats.json` |
+| the worked example of Section 4 | | `analysis/taper_example.py` | `results/desktop/taper.json` |
+| the query stream's working set (hottest 32 MiB), Section 6.2 | | `analysis/query_stream.py` (numpy) | `results/query_stream.json` |
+| other users' load on the shared server, Section 5 | | `results/server/other_load_sampler.py` (ran beside the runner, not part of it) | `results/server/other_load.tsv`, `other_load_spans.tsv` |
+| Table 2 and the penalty check of Appendix B | | `src/verify_schedule.py`, `src/verify_penalty.py` | printed |
 
-`src/entmax_analyze.py` then profiles support sizes and cross-checks the exact
-solver against bisection.
+Every row of a log records the exact command, the repetition, the load average
+before and after, and the available memory. `results/<machine>/env-*.json` records
+`lscpu`, `free`, the kernel, the compiler, the flags, the transparent huge page
+setting and the library versions.
 
-## Layout
+## Measure again
 
+```bash
+scripts/get_deps.sh            # abseil from source with our flags, Boost 1.86 headers (needs network)
+make -j && make modes          # must print "absl available" and "boost available"
+python3 scripts/run.py --machine server  --plans all                          # about 7 h
+python3 scripts/run.py --machine desktop --plans all --ooc-dir /data/tg-ooc   # about 3 h
 ```
-src/refimpl.py         reference rank/unrank + exhaustive tests
-src/warped.py          nested-alphabet (warped/selective) ranker + verification
-src/verify_schedule.py optimal taper ratio, numerically
-src/verify_penalty.py  Theorem 3 vs the exact discrete optimum
-src/entmax_analyze.py  α-entmax solver check + support-size profiling
-src/bench.cpp          in-RAM: tapered / tapered-ram / rankonly / base-table / hash / oahash
-src/ooc_bench.cpp      out-of-core: build / scan-verify / random queries / locality walk
-src/pl_bench.cpp       Plackett–Luce application benchmark
-src/entmax_bench.cpp   α-entmax application benchmark
-src/spike_bench.py     early Python size/latency spike (superseded by the C++)
-paper/                 LaTeX source
-```
+
+Re-running a command resumes: measurements already in `results/` are skipped. Each
+configuration runs as its own process; a repetition runs every configuration once,
+in a shuffled order, before the next begins. Single-threaded cells are pinned to one
+core, and every process runs with `GLIBC_TUNABLES=glibc.malloc.hugetlb=1`, so that
+absl, Boost and `std::unordered_map` get huge pages as the array does. In the code,
+`pl` stands for the vector root of Biswas and Regan, for historical reasons. The out-of-core experiments only mean something when RAM is smaller than the
+22.3 GB table file, and `--ooc-dir` must be on the disk under test. The runner
+refuses to start them below 12 GiB of available memory unless given `--force`,
+because a machine with too little page cache gives a different experiment.
+
+The α-entmax rows are not redistributed, because they derive from GPT-2 and
+WikiText-2. `python3 src/dump_entmax_rows.py` regenerates them in about 15 minutes on
+a CPU (needs torch, transformers, datasets) with seed 0, as `data/entmax_u.bin`.
 
 ## Citing
 
-This artifact is archived on Zenodo with a DOI:
-
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21675851.svg)](https://doi.org/10.5281/zenodo.21675851)
-
-`10.5281/zenodo.21675851` is the concept DOI and always resolves to the latest
-release; `10.5281/zenodo.21675852` pins v1.0.0, the snapshot behind the numbers
-reported in the paper.
-
-The paper is on arXiv as [arXiv:2609.20276](https://arxiv.org/abs/2609.20276)
-and is under journal submission; until the journal version appears, please cite
-the arXiv version together with this artifact.
-
-## License
-
-MIT — see `LICENSE`.
+Cite the Zenodo record: <https://doi.org/10.5281/zenodo.21675851> (all versions).
+MIT licence. The design follows Biswas and Regan, *Approximation of function
+evaluation over sequence arguments via specialized data structures*, Theoretical
+Computer Science 607 (2015) 113–123.

@@ -1,53 +1,51 @@
-// At-scale, out-of-core head-to-head for the SEA paper's central claim:
-//   tapered flat array + O(d) closed-form address (mmap'd file)  vs  hash memo.
+// In-RAM head-to-head: values-only array addressed by rank vs key-storing maps.
 //
-// The Python micro-bench let the C-level dict win because our rank was
-// interpreted. Here both are compiled; the flat array is a real mmap'd file
-// (out-of-core, like the paper's 77M-entry file) and the map is a real
-// std::unordered_map. We measure query latency and peak RSS at a scale where
-// the working set >> L3, so DRAM access pattern — not language overhead —
-// decides it.
+// usage: bench <mode> B d M seed [patterns] [rotate]
+//   rankonly            index arithmetic only, no memory access
+//   tapered-ram         array in anonymous memory, transparent huge pages
+//   tapered-ram-nohuge  same, 4 KiB pages
+//   tapered             array in a tg::Table file mapping (memo.tg in cwd)
+//   tabled              the 2015 node-count index (first coordinate pinned)
+//   oahash[-nohuge]     hand-rolled open addressing, inline u64 keys
+//   absl                absl::flat_hash_map<u64,float>, reserve(N)
+//   boost               boost::unordered_flat_map<u64,float>, reserve(N)
+//   hash                std::unordered_map<u64,float>, reserve(N)
+// Suffixes, combinable:
+//   +pin  queries with the first coordinate pinned to 1, as the 2015 index
+//         requires; separates its query domain from its index arithmetic
+//   +two  the two-read form of the rank, the library's first implementation
+//   +pre  addresses computed before the clock starts: the memory reads alone
 //
-// build:  g++ -O3 -march=native -o bench bench.cpp
-// run:    ./bench tapered 16 13 3000000 42
-//         ./bench hash    16 13 3000000 42
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <cstdint>
-#include <vector>
-#include <string>
+// patterns is a comma list of access patterns timed in this one process, after
+// one build and one untimed pass over the queries (default ind). Without that
+// pass, whichever pattern ran first paid the cold start. rotate, the repetition
+// number, rotates their order as well.
+//   ind    independent lookups: the stream is fixed, so lookups may overlap;
+//          the time per lookup is reciprocal throughput
+//   dep    dependent lookups: the same stream, but each query's address depends
+//          on the previous answer, so lookups cannot overlap; this is latency
+//   batch  independent lookups, 32 at a time: addresses first, each prefetched,
+//          then the reads (tg::Table::get_many, or the same loop for a hash table)
+//   batch:W  the same with batch size W (array only)
+//
+// One query stream (xorshift, sorted), identical across modes, so checksums
+// must agree. Prints one JSON line per pattern. Build flags: see Makefile.
+#include "common.hpp"
+#include "tg.hpp"
+#include <type_traits>
 #include <unordered_map>
-#include <algorithm>
-#include <chrono>
-#include <fcntl.h>
-#include <unistd.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
-#include <sys/resource.h>
+#if __has_include(<absl/container/flat_hash_map.h>)
+#include <absl/container/flat_hash_map.h>
+#define HAVE_ABSL 1
+#endif
+#if __has_include(<boost/unordered/unordered_flat_map.hpp>)
+#include <boost/unordered/unordered_flat_map.hpp>
+#define HAVE_BOOST 1
+#endif
 
-using u64 = uint64_t;
-using clk = std::chrono::high_resolution_clock;
-
-static u64 C[64][64];               // Pascal's triangle
-static void pascal() {
-    for (int n = 0; n < 64; n++) { C[n][0] = 1;
-        for (int k = 1; k <= n; k++) C[n][k] = C[n-1][k-1] + (k<=n-1?C[n-1][k]:0); }
-}
-
-// table-free O(d) lexicographic rank (hockey-stick closed form), cols 1..B
-static inline u64 rank_fixed(const int* cols, int d, int B) {
-    int m_prev = 1; u64 r = 0;
-    for (int i = 1; i <= d; i++) {
-        int mi = cols[i-1], k = d - i;
-        r += C[B - m_prev + k + 1][k+1] - C[B - mi + k + 1][k+1];
-        m_prev = mi;
-    }
-    return r;
-}
-
-// ---- base paper's TABLE-BASED index (Eq. 2 + Eq. 3): V table + prefix sums --
-static u64 V[64][64], PV[64][64];
+// ---- the 2015 table-based index (Eq. 2 + Eq. 3), via prefix sums ----------
+static u64 V[70][70], PV[70][70];
 static void build_tables(int B, int d) {
     for (int b = 0; b <= B; b++) V[1][b] = 0;
     for (int b = 1; b <= B; b++) V[2][b] = 1;
@@ -55,163 +53,228 @@ static void build_tables(int B, int d) {
         for (int b = 1; b <= B; b++) { u64 s = 0; for (int j = b; j <= B; j++) s += V[i-1][j]; V[i][b] = s; }
     for (int i = 1; i <= d; i++) { PV[i][0] = 0; for (int b = 1; b <= B; b++) PV[i][b] = PV[i][b-1] + V[i][b]; }
 }
-static inline u64 rank_tabled(const int* cols, int d, int B) {   // Eq. 3 via prefix sums
-    u64 r = 0;
-    for (int i = 1; i <= d-1; i++) { int row = d+1-i, a = cols[i-1], b = cols[i];
-        r += PV[row][b-1] - PV[row][a-1]; }
+TG_ALWAYS_INLINE u64 rank_tabled(const int* c, int d, int B) {
+    (void)B; u64 r = 0;
+    for (int i = 1; i <= d - 1; i++) { int row = d + 1 - i, a = c[i-1], b = c[i]; r += PV[row][b-1] - PV[row][a-1]; }
     return r;
 }
 
-static inline float value_of(u64 r) {                 // cheap deterministic payload
-    u64 h = r * 2654435761ull; return float(h & 0xFFFFFF) * (1.0f/16777216.0f);
+// The rank as first implemented: both terms of each telescoping pair of
+//   rank(m) = sum_{i=1}^{d} [ C(B-m_{i-1}+d-i+1, d-i+1) - C(B-m_i+d-i+1, d-i+1) ],
+// m_0 = 1. Same value as tg::rank, about twice the instructions per coordinate.
+TG_ALWAYS_INLINE u64 rank_two(const int* m, int d, int B, const tg::Pascal& P) {
+    int prev = 1; u64 r = 0;
+    for (int i = 1; i <= d; i++) {
+        int mi = m[i-1], k = d - i;
+        r += P(B - prev + k + 1, k + 1) - P(B - mi + k + 1, k + 1);
+        prev = mi;
+    }
+    return r;
 }
 
-// Packed key: ceil(log2 B) bits per column, so any B fits without collisions
-// as long as bits*d <= 63 (the all-ones word is reserved as the open-addressing
-// empty sentinel). The earlier hardcoded 4 bits/column silently collided for
-// B > 16; the server N-sweep already used this generalization.
-static int PACK_BITS = 4;
-static void set_pack_bits(int B, int d) {
-    PACK_BITS = 1; while ((1 << PACK_BITS) < B) PACK_BITS++;
-    if (PACK_BITS * d > 63) { fprintf(stderr, "pack: %d bits x %d cols exceeds 63\n", PACK_BITS, d); exit(1); }
-}
-static inline u64 pack(const int* cols, int d) {
-    u64 k = 0; for (int i = 0; i < d; i++) k |= u64(cols[i]-1) << (PACK_BITS*i); return k;
-}
-
-static long peak_rss_mb() {
-    struct rusage ru; getrusage(RUSAGE_SELF, &ru); return ru.ru_maxrss / 1024;
-}
-
-// xorshift so query generation is identical & cheap across both modes
-static inline u64 xs(u64& s){ s^=s<<13; s^=s>>7; s^=s<<17; return s; }
-static void gen_query(u64& s, int d, int B, int* out) {
-    for (int i = 0; i < d; i++) out[i] = int(xs(s) % B) + 1;
-    std::sort(out, out + d);
-}
-
-
-// ---- open-addressing flat hash: inline 64-bit keys, linear probing ---------
-// The strongest simple in-RAM baseline: one contiguous array of 16-byte
-// {key,value} slots (the layout of absl::flat_hash_map<u64,float>), capacity a
-// power of two chosen so that load <= 7/8 (absl's max load), splitmix64
-// finalizer as the hash, linear probing. Empty slot = all-ones key, which no
-// packed key can equal because set_pack_bits() enforces bits*d <= 63.
-static inline u64 mix64(u64 x){ x+=0x9e3779b97f4a7c15ull; x=(x^(x>>30))*0xbf58476d1ce4e5b9ull;
-    x=(x^(x>>27))*0x94d049bb133111ebull; return x^(x>>31); }
+// ---- hand-rolled open addressing: 16-byte {key,value} slots, linear probing,
+// splitmix64, power-of-two capacity with load <= 7/8 ------------------------
 struct OASlot { u64 key; float val; };
 struct OATable {
-    OASlot* s; u64 mask; u64 cap;
-    static const u64 EMPTY = ~0ull;
-    OATable(u64 n, bool nohuge=false){ cap=1; while (double(n)/double(cap) > 0.875) cap<<=1; mask=cap-1;
-        size_t bytes=cap*sizeof(OASlot);
-        s=(OASlot*)mmap(nullptr,bytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
-        madvise(s,bytes, nohuge?MADV_NOHUGEPAGE:MADV_HUGEPAGE);
-        for(u64 i=0;i<cap;i++) s[i].key=EMPTY; }
-    inline void insert(u64 k,float v){ u64 i=mix64(k)&mask;
-        while(s[i].key!=EMPTY && s[i].key!=k) i=(i+1)&mask; s[i].key=k; s[i].val=v; }
-    inline float get(u64 k) const { u64 i=mix64(k)&mask;
-        while(s[i].key!=k) i=(i+1)&mask; return s[i].val; }
+    OASlot* s; u64 mask, cap; static const u64 EMPTY = ~0ull;
+    OATable(u64 n, bool nohuge) {
+        cap = 1; while (double(n) / double(cap) > 0.875) cap <<= 1; mask = cap - 1;
+        size_t bytes = cap * sizeof(OASlot);
+        s = (OASlot*)mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        madvise(s, bytes, nohuge ? MADV_NOHUGEPAGE : MADV_HUGEPAGE);
+        for (u64 i = 0; i < cap; i++) s[i].key = EMPTY;
+    }
+    ~OATable() { munmap(s, cap * sizeof(OASlot)); }
+    void insert(u64 k, float v) { u64 i = mix64(k) & mask; while (s[i].key != EMPTY && s[i].key != k) i = (i + 1) & mask; s[i].key = k; s[i].val = v; }
+    float from(u64 i, u64 k) const { while (s[i].key != k) i = (i + 1) & mask; return s[i].val; }
+    float get(u64 k) const { return from(mix64(k) & mask, k); }
 };
 
+template <class Ins>
+static void enumerate(int B, int d, Ins ins) {        // every key, lex order
+    std::vector<int> c(d, 1);
+    do ins(c.data()); while (tg::next(c.data(), d, B));
+}
+
+static constexpr long BATCH = 32;
+#define INL __attribute__((always_inline))          // every structure's lookup inlined alike
+
 int main(int argc, char** argv) {
-    if (argc < 6) { fprintf(stderr, "usage: %s tapered|tapered-ram|tapered-ram-nohuge|tabled|hash|oahash|oahash-nohuge|rankonly B d M seed\n", argv[0]); return 1; }
+    if (argc < 6) { std::fprintf(stderr, "usage: %s mode B d M seed [patterns] [rotate]\n", argv[0]); return 1; }
     std::string mode = argv[1];
-    int B = atoi(argv[2]), d = atoi(argv[3]); long M = atol(argv[4]); u64 seed = atoll(argv[5]);
-    pascal(); set_pack_bits(B, d);
-    u64 N = C[B + d - 1][d];
-    printf("mode=%-7s B=%d d=%d  N=%llu  M=%ld\n", mode.c_str(), B, d, (unsigned long long)N, M);
+    auto has = [&](const char* sfx) { auto p = mode.find(sfx); if (p == std::string::npos) return false; mode.erase(p, std::strlen(sfx)); return true; };
+    const bool pin = has("+pin"), two = has("+two"), pre = has("+pre");
+    const std::string mode_full = argv[1];
+    int B = atoi(argv[2]), d = atoi(argv[3]); long M = atol(argv[4]); u64 seed = strtoull(argv[5], 0, 10);
+    std::vector<std::string> pats;
+    { std::string p = argc > 6 ? argv[6] : "ind"; size_t i = 0;
+      while (i <= p.size()) { size_t j = p.find(',', i); if (j == std::string::npos) j = p.size(); pats.push_back(p.substr(i, j - i)); i = j + 1; }
+      if (argc > 7) std::rotate(pats.begin(), pats.begin() + atol(argv[7]) % (long)pats.size(), pats.end()); }
+    tg::Shape sh{B, d};
+    if (!sh.valid()) { std::fprintf(stderr, "invalid shape\n"); return 1; }
+    const tg::Pascal& P = tg::pascal();
+    const u64 N = sh.size();
 
-    // pre-generate queries (common to both modes; excluded from build/latency of structure)
     std::vector<int> Q((size_t)M * d);
-    { u64 s = seed | 1; for (long q = 0; q < M; q++) gen_query(s, d, B, &Q[(size_t)q*d]); }
+    { u64 s = seed | 1; for (long q = 0; q < M; q++) gen_query(s, d, B, &Q[(size_t)q * d]); }
+    if (pin) for (long q = 0; q < M; q++) Q[(size_t)q * d] = 1;
+    const double qbuf_mib = double(Q.size() * sizeof(int)) / 1048576.0;
 
-    double checksum = 0; double build_s = 0, lat_ns = 0;
-
-    if (mode == "tapered" || mode == "tabled") {
-        // both use the same mmap'd flat array; they differ ONLY in the index
-        // computation: table-free closed form (tapered) vs base-paper V-table (tabled).
-        bool tabled = (mode == "tabled");
-        if (tabled) {
-            // The base paper's Eq. (3) is correct only on its actual domain: the
-            // first coordinate pinned to the minimum (x_1 = 0). Pin col[0]=1 so
-            // the comparison is faithful; then tabled == table-free.
-            build_tables(B, d);
-            for (long q = 0; q < M; q++) Q[(size_t)q*d] = 1;
-            u64 s = seed | 7;                      // verify tabled == table-free (pinned)
-            for (int t = 0; t < 20000; t++) { int c[32]; gen_query(s, d, B, c); c[0] = 1;
-                if (rank_tabled(c, d, B) != rank_fixed(c, d, B)) { fprintf(stderr, "MISMATCH\n"); return 2; } }
+    // Every build generates each key and computes the same payload from it, so build
+    // times differ only by what each structure does with the pair.
+    auto payload = [&](const int* m, int dd) { return value_of(tg::rank(m, dd, B, P)); };
+    double build_s = 0, struct_mib = 0; u64 capacity = 0;
+    long batch_w = 0;                                   // from pattern batch:W
+    auto emit = [&](const std::string& pat, double lat_ns, double checksum) {
+        J("bench").s("mode", mode_full + (pat == "ind" ? "" : "+" + pat)).s("base_mode", mode).s("pattern", pat)
+            .i("pin", pin || mode == "tabled").i("two", two).i("pre", pre).i("B", B).i("d", d).u("N", N).i("M", M).u("seed", seed)
+            .f("build_s", build_s).f("query_ns", lat_ns).f("peak_rss_mib", peak_rss_mib())
+            .f("qbuf_mib", qbuf_mib).f("struct_mib", struct_mib).f("anon_huge_mib", anon_huge_mib()).u("capacity", capacity)
+            .d("checksum", checksum).s("thp", thp_mode()).emit();
+    };
+    // get: answer one query. batched: answer all of Q in batches, or nullptr.
+    auto measure = [&](auto get, auto batched) {
+        double warm = 0;
+        for (long q = 0; q < M; q++) warm += get(&Q[(size_t)q * d]);
+        std::fprintf(stderr, "warm-up pass checksum %.3f\n", warm);
+        for (const std::string& pat : pats) {
+            double checksum = 0;
+            auto t1 = clk::now();
+            if (pat == "ind") {
+                for (long q = 0; q < M; q++) checksum += get(&Q[(size_t)q * d]);
+            } else if (pat == "dep") {
+                // Same queries in the same order, but query q's address depends on
+                // answer q-1 through v*0.0 (not foldable without -ffast-math), so
+                // the lookups cannot overlap. An index that is a function of the
+                // previous one alone would fall into a short cycle and hit cache.
+                double v = 0;
+                for (long q = 0; q < M; q++) {
+                    size_t j = (size_t)q + (size_t)(v * 0.0);
+                    v = get(&Q[j * d]); checksum += v;
+                }
+            } else if constexpr (!std::is_same_v<decltype(batched), std::nullptr_t>) {
+                batch_w = pat.size() > 6 ? atol(pat.c_str() + 6) : 0;
+                batched(checksum);
+            } else {
+                std::fprintf(stderr, "no batched path for this mode\n"); std::exit(1);
+            }
+            emit(pat, secs_since(t1) * 1e9 / M, checksum);
         }
-        auto t0 = clk::now();
-        const char* path = "memo.bin";
-        int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0644);
-        if (ftruncate(fd, (off_t)N * sizeof(float))) { perror("ftruncate"); return 1; }
-        float* arr = (float*)mmap(nullptr, (size_t)N*sizeof(float), PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
-        for (u64 r = 0; r < N; r++) arr[r] = value_of(r);   // fill by rank directly
-        msync(arr, (size_t)N*sizeof(float), MS_SYNC);
-        build_s = std::chrono::duration<double>(clk::now()-t0).count();
+    };
 
-        // ---- query: cols -> O(d) index -> one mmap read ------------------
-        auto t1 = clk::now();
-        if (tabled) for (long q = 0; q < M; q++) checksum += arr[ rank_tabled(&Q[(size_t)q*d], d, B) ];
-        else        for (long q = 0; q < M; q++) checksum += arr[ rank_fixed (&Q[(size_t)q*d], d, B) ];
-        lat_ns = std::chrono::duration<double,std::nano>(clk::now()-t1).count() / M;
-        munmap(arr, (size_t)N*sizeof(float)); close(fd);
-    } else if (mode == "tapered-ram" || mode == "tapered-ram-nohuge") {
-        // same closed-form index, values in anonymous memory instead of a file
-        // mapping: isolates the index from the page-size/TLB effects of mmap.
+    if (mode == "rankonly") {
+        u64 acc = 0; auto t1 = clk::now();
+        if (two) for (long q = 0; q < M; q++) acc += rank_two(&Q[(size_t)q * d], d, B, P);
+        else     for (long q = 0; q < M; q++) acc += tg::rank(&Q[(size_t)q * d], d, B, P);
+        emit("ind", secs_since(t1) * 1e9 / M, double(acc & 0xFFFFFF));
+    } else if (mode == "tapered-ram" || mode == "tapered-ram-nohuge" || mode == "tapered") {
+        const bool file = mode == "tapered";
         auto t0 = clk::now();
-        size_t bytes=(size_t)N*sizeof(float);
-        float* arr=(float*)mmap(nullptr,bytes,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
-        madvise(arr,bytes, mode=="tapered-ram-nohuge"?MADV_NOHUGEPAGE:MADV_HUGEPAGE);
-        for (u64 r = 0; r < N; r++) arr[r] = value_of(r);
-        build_s = std::chrono::duration<double>(clk::now()-t0).count();
-        auto t1 = clk::now();
-        for (long q = 0; q < M; q++) checksum += arr[ rank_fixed(&Q[(size_t)q*d], d, B) ];
-        lat_ns = std::chrono::duration<double,std::nano>(clk::now()-t1).count() / M;
-        munmap(arr,bytes);
-    } else if (mode == "rankonly") {
-        // index arithmetic alone: no memory access at all (sum of ranks)
-        auto t1 = clk::now();
-        u64 acc=0; for (long q = 0; q < M; q++) acc += rank_fixed(&Q[(size_t)q*d], d, B);
-        lat_ns = std::chrono::duration<double,std::nano>(clk::now()-t1).count() / M;
-        checksum = double(acc & 0xFFFFFF);
+        auto t = file ? tg::Table<float>::create("memo.tg", sh) : tg::Table<float>::anonymous(sh, mode == "tapered-ram");
+        t.fill(payload);
+        if (file) t.sync(false);
+        build_s = secs_since(t0); struct_mib = N * 4.0 / 1048576.0;
+        const float* a = t.data();
+        if (pre) {
+            std::vector<u64> R(M);
+            for (long q = 0; q < M; q++) R[q] = tg::rank(&Q[(size_t)q * d], d, B, P);
+            const u64* rp = R.data();
+            { double warm = 0; for (long q = 0; q < M; q++) warm += a[rp[q]];
+              std::fprintf(stderr, "warm-up pass checksum %.3f\n", warm); }
+            for (const std::string& pat : pats) {
+                double checksum = 0, v = 0; auto t1 = clk::now();
+                if (pat == "dep") for (long q = 0; q < M; q++) { size_t j = (size_t)q + (size_t)(v * 0.0); v = a[rp[j]]; checksum += v; }
+                else              for (long q = 0; q < M; q++) checksum += a[rp[q]];
+                emit(pat, secs_since(t1) * 1e9 / M, checksum);
+            }
+        } else if (two) {
+            measure([&](const int* m) INL { return a[rank_two(m, d, B, P)]; }, [&](double& cs) {
+                u64 r[BATCH];
+                for (long q = 0; q < M; q += BATCH) {
+                    const long n = std::min(BATCH, M - q);
+                    for (long i = 0; i < n; i++) { r[i] = rank_two(&Q[(size_t)(q + i) * d], d, B, P); __builtin_prefetch(a + r[i]); }
+                    for (long i = 0; i < n; i++) cs += a[r[i]];
+                } });
+        } else {
+            measure([&](const int* m) INL { return a[tg::rank(m, d, B, P)]; }, [&](double& cs) {
+                if (batch_w) {
+                    std::vector<u64> r(batch_w);
+                    for (long q = 0; q < M; q += batch_w) {
+                        const long n = std::min(batch_w, M - q);
+                        for (long i = 0; i < n; i++) { r[i] = tg::rank(&Q[(size_t)(q + i) * d], d, B, P); __builtin_prefetch(a + r[i]); }
+                        for (long i = 0; i < n; i++) cs += a[r[i]];
+                    }
+                    return;
+                }
+                float out[1024];
+                for (long q = 0; q < M; q += 1024) {
+                    const long n = std::min(1024L, M - q);
+                    t.get_many(&Q[(size_t)q * d], (size_t)n, out);
+                    for (long i = 0; i < n; i++) cs += out[i];
+                } });
+        }
+    } else if (mode == "tabled") {
+        build_tables(B, d);
+        for (long q = 0; q < M; q++) Q[(size_t)q * d] = 1;      // its domain: x_1 pinned
+        { u64 s = seed | 7;
+          for (int k = 0; k < 20000; k++) { int c[64]; gen_query(s, d, B, c); c[0] = 1;
+              if (rank_tabled(c, d, B) != tg::rank(c, d, B, P)) { std::fprintf(stderr, "MISMATCH\n"); return 2; } } }
+        auto t0 = clk::now();
+        auto t = tg::Table<float>::create("memo.tg", sh);
+        t.fill(payload);
+        t.sync(false);
+        build_s = secs_since(t0); struct_mib = N * 4.0 / 1048576.0;
+        const float* a = t.data();
+        measure([&](const int* m) INL { return a[rank_tabled(m, d, B)]; }, nullptr);
     } else if (mode == "oahash" || mode == "oahash-nohuge") {
+        Packer pack(B, d);
         auto t0 = clk::now();
         OATable T(N, mode == "oahash-nohuge");
-        std::vector<int> cols(d, 1);
-        for (u64 done = 0; done < N; done++) {
-            T.insert(pack(cols.data(), d), value_of(rank_fixed(cols.data(), d, B)));
-            int i = d - 1; while (i >= 0 && cols[i] == B) i--;
-            if (i < 0) break; cols[i]++; for (int j = i+1; j < d; j++) cols[j] = cols[i];
-        }
-        build_s = std::chrono::duration<double>(clk::now()-t0).count();
-        printf("  oahash: capacity=%llu  load=%.3f  slot=%zu B  table=%.0f MB\n",
-               (unsigned long long)T.cap, double(N)/double(T.cap), sizeof(OASlot),
-               double(T.cap)*sizeof(OASlot)/1048576.0);
-        auto t1 = clk::now();
-        for (long q = 0; q < M; q++) checksum += T.get(pack(&Q[(size_t)q*d], d));
-        lat_ns = std::chrono::duration<double,std::nano>(clk::now()-t1).count() / M;
-        munmap(T.s, T.cap*sizeof(OASlot));
-    } else {
-        // ---- build a real unordered_map keyed by packed cols -------------
+        enumerate(B, d, [&](const int* m) { T.insert(pack(m, d), value_of(tg::rank(m, d, B, P))); });
+        build_s = secs_since(t0); capacity = T.cap; struct_mib = T.cap * sizeof(OASlot) / 1048576.0;
+        measure([&](const int* m) INL { return T.get(pack(m, d)); }, [&](double& cs) {
+            u64 k[BATCH], h[BATCH];
+            for (long q = 0; q < M; q += BATCH) {
+                const long n = std::min(BATCH, M - q);
+                for (long i = 0; i < n; i++) { k[i] = pack(&Q[(size_t)(q + i) * d], d); h[i] = mix64(k[i]) & T.mask; __builtin_prefetch(&T.s[h[i]]); }
+                for (long i = 0; i < n; i++) cs += T.from(h[i], k[i]);
+            } });
+#ifdef HAVE_ABSL
+    } else if (mode == "absl") {
+        Packer pack(B, d);
         auto t0 = clk::now();
-        std::unordered_map<u64,float> mp; mp.reserve(N * 1.3);
-        std::vector<int> cols(d, 1);
-        for (u64 done = 0; done < N; done++) {               // enumerate all combos (odometer)
-            mp[pack(cols.data(), d)] = value_of(rank_fixed(cols.data(), d, B));
-            int i = d - 1; while (i >= 0 && cols[i] == B) i--;      // advance non-decreasing tuple
-            if (i < 0) break; cols[i]++; for (int j = i+1; j < d; j++) cols[j] = cols[i];
-        }
-        build_s = std::chrono::duration<double>(clk::now()-t0).count();
-
-        // ---- query: cols -> key -> hash lookup ---------------------------
-        auto t1 = clk::now();
-        for (long q = 0; q < M; q++) checksum += mp[ pack(&Q[(size_t)q*d], d) ];
-        lat_ns = std::chrono::duration<double,std::nano>(clk::now()-t1).count() / M;
+        absl::flat_hash_map<u64, float> mp; mp.reserve(N);
+        enumerate(B, d, [&](const int* m) { mp.emplace(pack(m, d), value_of(tg::rank(m, d, B, P))); });
+        build_s = secs_since(t0); capacity = mp.capacity();
+        struct_mib = capacity * (sizeof(std::pair<const u64, float>) + 1.0) / 1048576.0;
+        measure([&](const int* m) INL { return mp.find(pack(m, d))->second; }, [&](double& cs) {
+            u64 k[BATCH];
+            for (long q = 0; q < M; q += BATCH) {
+                const long n = std::min(BATCH, M - q);
+                for (long i = 0; i < n; i++) { k[i] = pack(&Q[(size_t)(q + i) * d], d); mp.prefetch(k[i]); }
+                for (long i = 0; i < n; i++) cs += mp.find(k[i])->second;
+            } });
+#endif
+#ifdef HAVE_BOOST
+    } else if (mode == "boost") {
+        Packer pack(B, d);
+        auto t0 = clk::now();
+        boost::unordered_flat_map<u64, float> mp; mp.reserve(N);
+        enumerate(B, d, [&](const int* m) { mp.emplace(pack(m, d), value_of(tg::rank(m, d, B, P))); });
+        build_s = secs_since(t0); capacity = mp.bucket_count();
+        struct_mib = capacity * (sizeof(std::pair<const u64, float>) + 16.0 / 15.0) / 1048576.0;
+        measure([&](const int* m) INL { return mp.find(pack(m, d))->second; }, nullptr);
+#endif
+    } else if (mode == "hash") {
+        Packer pack(B, d);
+        auto t0 = clk::now();
+        std::unordered_map<u64, float> mp; mp.reserve(N);
+        enumerate(B, d, [&](const int* m) { mp[pack(m, d)] = value_of(tg::rank(m, d, B, P)); });
+        build_s = secs_since(t0); capacity = mp.bucket_count();
+        measure([&](const int* m) INL { return mp.find(pack(m, d))->second; }, nullptr);
+    } else {
+        std::fprintf(stderr, "unknown or unavailable mode '%s'\n", mode.c_str()); return 1;
     }
-
-    printf("  build=%.2fs  latency=%.1f ns/query  peakRSS=%ld MB  checksum=%.3f\n",
-           build_s, lat_ns, peak_rss_mb(), checksum);
+    std::remove("memo.tg");
     return 0;
 }

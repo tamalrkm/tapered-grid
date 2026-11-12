@@ -1,0 +1,79 @@
+[
+ {
+  "B": 48,
+  "d": 6,
+  "N": 22957480,
+  "queries": 3000000,
+  "distinct_keys": 2785504,
+  "array_lines": 1202611,
+  "uniform_lines": 1257517,
+  "hot32_array": 0.6675963333333333,
+  "hot32_hash": 0.24626133333333333
+ },
+ {
+  "B": 28,
+  "d": 8,
+  "N": 23535820,
+  "queries": 3000000,
+  "distinct_keys": 2733048,
+  "array_lines": 1129198,
+  "uniform_lines": 1279612,
+  "hot32_array": 0.716623,
+  "hot32_hash": 0.2637466666666667
+ },
+ {
+  "B": 20,
+  "d": 10,
+  "N": 20030010,
+  "queries": 3000000,
+  "distinct_keys": 2575068,
+  "array_lines": 908328,
+  "uniform_lines": 1137899,
+  "hot32_array": 0.8337296666666667,
+  "hot32_hash": 0.31640666666666667
+ },
+ {
+  "B": 16,
+  "d": 13,
+  "N": 37442160,
+  "queries": 3000000,
+  "distinct_keys": 2600849,
+  "array_lines": 1138495,
+  "uniform_lines": 1690775,
+  "hot32_array": 0.7552933333333334,
+  "hot32_hash": 0.307813
+ },
+ {
+  "B": 14,
+  "d": 15,
+  "N": 37442160,
+  "queries": 3000000,
+  "distinct_keys": 2461972,
+  "array_lines": 1009372,
+  "uniform_lines": 1690775,
+  "hot32_array": 0.8205493333333334,
+  "hot32_hash": 0.3541053333333333
+ },
+ {
+  "B": 13,
+  "d": 16,
+  "N": 30421755,
+  "queries": 3000000,
+  "distinct_keys": 2289026,
+  "array_lines": 838079,
+  "uniform_lines": 1508872,
+  "hot32_array": 0.895403,
+  "hot32_hash": 0.411754
+ },
+ {
+  "B": 11,
+  "d": 20,
+  "N": 30045015,
+  "queries": 3000000,
+  "distinct_keys": 1968293,
+  "array_lines": 660066,
+  "uniform_lines": 1497780,
+  "hot32_array": 0.9547406666666667,
+  "hot32_hash": 0.5149646666666666
+ }
+]

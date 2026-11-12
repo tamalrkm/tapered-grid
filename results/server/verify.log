@@ -1,0 +1,18 @@
+rank/unrank/step/prefix: 6426 keys
+Eq.(3) of the 2015 paper: agrees on 2989 pinned keys; B=2,d=2: (1,1)->0, (2,2)->0 (lex rank 2)
+simplex interpolation: exact on affine f, all vertices stored keys
+test_tg: all checks passed
+listing 1: f = 0.154130, nearest 0.150657, simplex 0.154066; slot 12345 round-trips
+[ok] exhaustive rank/unrank vs brute force: 6426 vectors verified
+[ok] paper Example 1 reproduced: index = 328 (expected 328)
+[info] round-trip unrank(328) = [1, 1, 3, 5, 15]
+[info] experiment size reconciliation:
+        C(B+d-1,d) for B=16,d=15         = 155,117,520
+        C(B+d-1,d) for B=16,d=14         = 77,558,760
+        paper_reported                   = 77,558,760
+[A] paper V-table matches published Table 7: False
+[A] paper Example 2 index = 10  (published: 400)  differs, as expected: the literal Eq. (7) does not give it; see [B]
+[B] nested ranker == exhaustive lex enumeration on Example-2 config: True (unrank: True, |keys|=6501)
+[B] example key on nested grid: True; pure lex rank = 400 (paper's index = 10; equal: False)
+[B] property test over 30 random nested configs: ALL PASS
+[ok] penalty formula check ran

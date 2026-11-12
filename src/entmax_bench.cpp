@@ -5,12 +5,16 @@
 // u_i >= theta contribute EXACTLY zero -> the tapered tail is exact, not
 // approximate. Domain is [0,1] (theta <= 1 always), first coordinate pinned.
 //
-// Compares, on the same 199,669 real rows, in the same language:
+// Compares, on the same real rows, in the same language:
 //   memo    : O(d) interpolate + O(d) rank + one array read
 //   exact   : sorted-support closed form (the fast exact algorithm)
 //   bisect  : 60-iteration bisection (what a naive implementation does)
 //
-// build: g++ -O3 -march=native -o entmax_bench entmax_bench.cpp
+// usage: entmax_bench B d gamma [reps=1] [rows=entmax_u.bin]
+// Output is JSON lines for scripts/run.py; the latency loops can be repeated
+// in-process.
+#include "common.hpp"
+#include "tg.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
@@ -20,13 +24,8 @@
 #include <algorithm>
 #include <chrono>
 
-using u64 = uint64_t;
-using clk = std::chrono::steady_clock;
 static const int K = 32;                 // stored gaps per row
 
-static u64 C[80][80];
-static void pascal(){ for(int n=0;n<80;n++){C[n][0]=1;
-  for(int k=1;k<=n;k++)C[n][k]=C[n-1][k-1]+(k<=n-1?C[n-1][k]:0);} }
 
 // ---- exact alpha=1.5 threshold: try support sizes on the sorted gaps -------
 static inline double theta_exact(const float* u, int n){
@@ -56,13 +55,8 @@ static inline double theta_bisect(const float* u,int n){
   return 0.5*(lo+hi);
 }
 
-// ---- table-free rank, first coordinate pinned (cols c_2..c_d over 1..B) ----
-static inline u64 rank_pin(const int* c,int d,int B){
-  int mp=1; u64 r=0; int m=d-1;                 // m free coordinates
-  for(int i=1;i<=m;i++){ int mi=c[i-1],k=m-i;
-    r+=C[B-mp+k+1][k+1]-C[B-mi+k+1][k+1]; mp=mi; }
-  return r;
-}
+// ---- the library's rank; the first coordinate is pinned, so d-1 are stored --
+static inline u64 rank_pin(const int* c,int d,int B){ return tg::rank(c,d-1,B,tg::pascal()); }
 // ---- monotone nearest-grid interpolation (paper's Interpolate, wt=0) ------
 static inline void snap(const float* u,int d,int B,const double* s,int* c){
   int lo=1;
@@ -75,21 +69,22 @@ static inline void snap(const float* u,int d,int B,const double* s,int* c){
 }
 
 int main(int argc,char**argv){
-  if(argc<4){fprintf(stderr,"usage: %s B d gamma\n",argv[0]);return 1;}
+  if(argc<4){fprintf(stderr,"usage: %s B d gamma [reps] [rows]\n",argv[0]);return 1;}
   int B=atoi(argv[1]), d=atoi(argv[2]); double gamma=atof(argv[3]);
-  pascal();
+  int reps = argc>4 ? atoi(argv[4]) : 1;
+  const char* rows_path = argc>5 ? argv[5] : "entmax_u.bin";
   std::vector<double> s(B+1);                    // s[1..B], tapered in [0,1]
   for(int j=1;j<=B;j++) s[j]=std::pow((double)(j-1)/(B-1), gamma);
 
   // load real rows
-  FILE* f=fopen("entmax_u.bin","rb"); if(!f){perror("entmax_u.bin");return 1;}
+  FILE* f=fopen(rows_path,"rb"); if(!f){perror(rows_path);return 1;}
   fseek(f,0,SEEK_END); long bytes=ftell(f); fseek(f,0,SEEK_SET);
   long N=bytes/(K*sizeof(float));
   std::vector<float> U((size_t)N*K);
   if(fread(U.data(),1,bytes,f)!=(size_t)bytes){perror("read");return 1;}
   fclose(f);
 
-  u64 M=C[B+d-2][d-1];                           // table size (coord-1 pinned)
+  u64 M=tg::Shape{B,d-1}.size();                 // table size (coord-1 pinned)
   printf("B=%d d=%d gamma=%.1f  |U|=%llu (%.1f MB)  rows=%ld\n",
          B,d,gamma,(unsigned long long)M,M*4/1e6,N);
   fflush(stdout);
@@ -109,10 +104,12 @@ int main(int argc,char**argv){
   // ---- accuracy over ALL real rows ----------------------------------------
   std::vector<double> err(N); double bias=0,emax=0;
   double dpmax_mean=0, dpmax_max=0;
+  std::vector<int> support(N);                    // entries below the threshold, per row
   { std::vector<int> c(d-1);
     for(long q=0;q<N;q++){
       const float* u=&U[(size_t)q*K];
       double tt=theta_exact(u,K);
+      { int k=0; while(k<K && u[k]<tt) k++; support[q]=k; }
       snap(u,d,B,s.data(),c.data());
       double th=tab[rank_pin(c.data(),d,B)];
       double e=th-tt; bias+=e; err[q]=std::fabs(e); emax=std::max(emax,std::fabs(e));
@@ -128,27 +125,31 @@ int main(int argc,char**argv){
   std::vector<double> se=err; std::sort(se.begin(),se.end());
   double emean=0; for(double e:err) emean+=e; emean/=N;
 
+  J("entmax_bench").s("what","accuracy").i("B",B).i("d",d).u("N",M).i("rows",N).f("build_s",build_s)
+    .f("err_mean",emean).f("err_p99",se[(size_t)(0.99*(N-1))]).f("err_max",emax)
+    .f("bias",bias).f("bias_over_mean",std::fabs(bias)/emean)
+    .f("dp_max_mean",dpmax_mean).f("dp_max_max",dpmax_max)
+    .f("support_mean",[&]{double t=0;for(int v:support)t+=v;return t/N;}())
+    .f("support_median",[&]{std::nth_element(support.begin(),support.begin()+N/2,support.end());return double(support[N/2]);}())
+    .emit();
+
   // ---- latency: single-row, same language, same rows ----------------------
   long Msub=std::min(N,100000L);
   std::vector<int> c(d-1); volatile double sink=0;
-  t0=clk::now();
-  for(long q=0;q<Msub;q++){ const float* u=&U[(size_t)q*K];
-    snap(u,d,B,s.data(),c.data()); sink+=tab[rank_pin(c.data(),d,B)]; }
-  double lat_memo=std::chrono::duration<double,std::nano>(clk::now()-t0).count()/Msub;
-  t0=clk::now();
-  for(long q=0;q<Msub;q++) sink+=theta_exact(&U[(size_t)q*K],K);
-  double lat_exact=std::chrono::duration<double,std::nano>(clk::now()-t0).count()/Msub;
-  t0=clk::now();
-  for(long q=0;q<Msub;q++) sink+=theta_bisect(&U[(size_t)q*K],K);
-  double lat_bis=std::chrono::duration<double,std::nano>(clk::now()-t0).count()/Msub;
-
-  printf("  build=%.1fs\n",build_s);
-  printf("  theta err: mean=%.2e p99=%.2e max=%.2e | bias=%+.2e (%.3fx mean|err|)\n",
-         emean,se[(size_t)(0.99*(N-1))],emax,bias,std::fabs(bias)/emean);
-  printf("  downstream max|dp|: mean=%.2e max=%.2e\n",dpmax_mean,dpmax_max);
-  printf("  latency ns/row: memo=%.0f  exact=%.0f  bisect=%.0f  "
-         "(memo speedup: %.1fx exact, %.1fx bisect)\n",
-         lat_memo,lat_exact,lat_bis,lat_exact/lat_memo,lat_bis/lat_memo);
-  (void)sink;
+  for(int rep=0;rep<reps;rep++){
+    auto t0=clk::now();
+    for(long q=0;q<Msub;q++){ const float* u=&U[(size_t)q*K];
+      snap(u,d,B,s.data(),c.data()); sink=sink+tab[rank_pin(c.data(),d,B)]; }
+    double lat_memo=std::chrono::duration<double,std::nano>(clk::now()-t0).count()/Msub;
+    t0=clk::now();
+    for(long q=0;q<Msub;q++) sink=sink+theta_exact(&U[(size_t)q*K],K);
+    double lat_exact=std::chrono::duration<double,std::nano>(clk::now()-t0).count()/Msub;
+    t0=clk::now();
+    for(long q=0;q<Msub;q++) sink=sink+theta_bisect(&U[(size_t)q*K],K);
+    double lat_bis=std::chrono::duration<double,std::nano>(clk::now()-t0).count()/Msub;
+    J("entmax_bench").s("what","latency").i("rep",rep).i("B",B).i("d",d)
+      .f("memo_ns",lat_memo).f("exact_ns",lat_exact).f("bisect_ns",lat_bis)
+      .f("memo_over_exact",lat_memo/lat_exact).emit();
+  }
   return 0;
 }

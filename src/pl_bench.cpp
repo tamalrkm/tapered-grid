@@ -1,136 +1,153 @@
-// Plackett-Luce / vectorized-root memoization: the paper's canonical f.
+// Vector-root memoization: single-query microbenchmark, accuracy of the two
+// lookup paths, and (optionally) bit-identity against a hash memo.
 //
-// f(x) = p1 solving  sum_i p1^{1/a_i} = 1,  a_i = 1 - x_i,  x_1 = 0,
-// x non-decreasing in [0,1) (the 2015 paper's own transform). No closed form
-// exists -> every exact evaluation is an iterative root-find with transcendental
-// pow() calls. Queries drawn from the 2015 paper's own generator (Sec. 5):
-//   p=0; x_1=0; repeat: r ~ U(p,1); x_next = p + (r-p)/b; p = x_next.
+// usage: pl_bench B d gamma [b=5] [threads=1] [table=-] [verify_hash=0] [reps=1]
+//   d      total coordinates; x_1 = 0 is pinned, so the table stores d-1
+//   table  path of a tg file to reuse (built and saved if absent); "-" = RAM
+//   verify_hash=1 (needs absl): every key's payload is recomputed independently
+//          into an absl::flat_hash_map keyed by the packed key, and compared
+//          bitwise with the array slot at rank(key); then every query's
+//          nearest-gridpoint answer is compared bitwise through both memos.
+//   reps   repeat the latency loops (fresh timing each, same process)
 //
-// build: g++ -O3 -march=native -o pl_bench pl_bench.cpp
-#include <cstdio>
-#include <cstdlib>
-#include <cstdint>
-#include <cmath>
-#include <vector>
-#include <algorithm>
-#include <chrono>
+// Lookup paths: nearest (snap + rank + one read), simplex (d+1 reads on the
+// Kuhn simplex), nearest+newton1 (memo value as the start of one Newton
+// iteration over the full vector). Accuracy is reported against f on the full
+// vector and against f on the first d coordinates (truncation removed).
+//
+// Queries: 2e5 vectors of length 32 from the generator of Biswas & Regan
+// (2015) Sec. 5; the memo uses the first d coordinates.
+#include "common.hpp"
+#include "pl.hpp"
+#include "tg.hpp"
+#include <mutex>
+#include <thread>
+#include <sys/stat.h>
+#if __has_include(<absl/container/flat_hash_map.h>)
+#include <absl/container/flat_hash_map.h>
+#define HAVE_ABSL 1
+#endif
 
-using u64 = uint64_t;
-using clk = std::chrono::steady_clock;
-static const int KMAX = 32;                 // query vector length
+static const int K = 32;
 
-static u64 C[80][80];
-static void pascal(){ for(int n=0;n<80;n++){C[n][0]=1;
-  for(int k=1;k<=n;k++)C[n][k]=C[n-1][k-1]+(k<=n-1?C[n-1][k]:0);} }
+int main(int argc, char** argv) {
+    if (argc < 4) { std::fprintf(stderr, "usage: %s B d gamma [b] [threads] [table] [verify_hash] [reps]\n", argv[0]); return 1; }
+    int B = atoi(argv[1]), d = atoi(argv[2]); double gamma = atof(argv[3]);
+    double bp = argc > 4 ? atof(argv[4]) : 5.0;
+    int threads = argc > 5 ? atoi(argv[5]) : 1;
+    std::string tpath = argc > 6 ? argv[6] : "-";
+    bool verify_hash = argc > 7 && atoi(argv[7]);
+    int reps = argc > 8 ? atoi(argv[8]) : 1;
 
-// ---- exact f: Newton on sum p^{b_i} = 1, b_i = 1/(1-x_i) ------------------
-static inline double p1_newton(const double* x,int n){
-  double p=0.5;
-  for(int it=0;it<40;it++){
-    double s=0,ds=0;
-    for(int i=0;i<n;i++){
-      double b=1.0/std::max(1e-12,1.0-x[i]);
-      double t=std::pow(p,b); s+=t; ds+=b*t/p;
+    const int ds = d - 1;                               // stored coordinates
+    tg::Shape sh{B, ds};
+    tg::Spacing sp = tg::Spacing::power(B, gamma);
+    const double* s = sp.s.data();
+    const u64 N = sh.size();
+    tg::Meta meta; meta.pin_first = 1; meta.spacing_kind = 1; meta.spacing_param = gamma;
+    std::snprintf(meta.note, sizeof meta.note, "pl::p1_newton, gcc %d.%d, -ffp-contract=off", __GNUC__, __GNUC_MINOR__);
+
+    const long NQ = 200000;
+    std::vector<double> X = pl::generate_queries(NQ, K, bp);
+
+    // ---- table: reuse a saved file or build ----------------------------------
+    tg::Table<float> tab; double build_s = 0; bool reused = false;
+    auto t0 = clk::now();
+    struct stat st;
+    if (tpath != "-" && stat(tpath.c_str(), &st) == 0) {
+        tab = tg::Table<float>::open(tpath, tg::Access::random, true);
+        if (tab.shape().B != B || tab.shape().d != ds || tab.meta().spacing_param != gamma || !tab.meta().pin_first) {
+            std::fprintf(stderr, "table file does not match B/d/gamma\n"); return 1; }
+        reused = true;
+    } else {
+        tab = tpath == "-" ? tg::Table<float>::anonymous(sh, true) : tg::Table<float>::create(tpath, sh, meta);
+        tab.fill([&](const int* m, int dd) { return pl::payload(m, dd, s); }, threads);
+        tab.sync(true);
     }
-    double step=(s-1.0)/ds; p-=step;
-    if(p<=1e-12)p=1e-12; if(p>=1)p=1-1e-12;
-    if(std::fabs(step)<1e-13) break;
-  }
-  return p;
-}
-static inline double p1_bisect(const double* x,int n){
-  double lo=0,hi=1;
-  for(int it=0;it<50;it++){
-    double m=0.5*(lo+hi),s=0;
-    for(int i=0;i<n;i++) s+=std::pow(m,1.0/std::max(1e-12,1.0-x[i]));
-    if(s<1.0) lo=m; else hi=m;
-  }
-  return 0.5*(lo+hi);
-}
+    build_s = secs_since(t0);
+    const float* arr = tab.data();
+    J("pl_bench").s("what", "build").i("B", B).i("d", d).f("gamma", gamma).u("N", N)
+        .f("table_mib", N * 4.0 / 1048576.0).i("threads", threads).i("reused", reused).f("build_s", build_s).emit();
 
-static inline u64 rank_pin(const int* c,int d,int B){
-  int mp=1; u64 r=0; int m=d-1;
-  for(int i=1;i<=m;i++){ int mi=c[i-1],k=m-i;
-    r+=C[B-mp+k+1][k+1]-C[B-mi+k+1][k+1]; mp=mi; }
-  return r;
-}
-static inline void snap(const double* x,int d,int B,const double* s,int* c){
-  int lo=1;
-  for(int i=1;i<d;i++){
-    double xi=std::min(x[i],1.0);
-    int j=lo;
-    while(j+1<=B && std::fabs(s[j+1]-xi) < std::fabs(s[j]-xi)) j++;
-    c[i-1]=j; lo=j;
-  }
-}
+    // ---- accuracy of both lookup paths ---------------------------------------
+    // exact: f on the full 32-vector. trunc: f on the first d coordinates only,
+    // which is what any table over d coordinates can at best return, so
+    // memo - exact = (memo - trunc) [interpolation] + (trunc - exact) [truncation].
+    std::vector<double> exact(NQ), trunc(NQ);
+    for (long q = 0; q < NQ; q++) { exact[q] = pl::p1_newton(&X[(size_t)q * K], K); trunc[q] = pl::p1_newton(&X[(size_t)q * K], d); }
+    auto nearest = [&](const double* x) { int m[tg::MAX_D]; tg::snap_nearest(x + 1, ds, sp, m); return arr[tg::rank(m, ds, B)]; };
+    auto simplex = [&](const double* x) { return tg::interp_simplex(arr, x + 1, ds, sp); };
+    auto newton1 = [&](const double* x) { return pl::p1_newton_from(x, K, nearest(x), 1); };
+    auto accuracy = [&](const char* path, auto look) {
+        std::vector<double> e(NQ); double bias = 0, mean = 0, mean_interp = 0, bias_interp = 0;
+        for (long q = 0; q < NQ; q++) { double v = look(&X[(size_t)q * K]);
+            bias += v - exact[q]; e[q] = std::fabs(v - exact[q]); mean += e[q];
+            bias_interp += v - trunc[q]; mean_interp += std::fabs(v - trunc[q]); }
+        bias /= NQ; mean /= NQ; bias_interp /= NQ; mean_interp /= NQ; std::sort(e.begin(), e.end());
+        J("pl_bench").s("what", "accuracy").s("path", path).i("B", B).i("d", d).u("N", N)
+            .f("err_mean", mean).f("err_p50", e[NQ / 2]).f("err_p99", e[size_t(0.99 * (NQ - 1))]).f("err_max", e[NQ - 1])
+            .f("bias", bias).f("bias_over_mean", std::fabs(bias) / mean)
+            .f("vs_trunc_err_mean", mean_interp).f("vs_trunc_bias", bias_interp).emit();
+    };
+    accuracy("trunc", [&](const double* x) { return pl::p1_newton(x, d); });
+    accuracy("nearest", nearest);
+    accuracy("simplex", simplex);
+    accuracy("nearest+newton1", newton1);
 
-int main(int argc,char**argv){
-  if(argc<4){fprintf(stderr,"usage: %s B d gamma [bparam]\n",argv[0]);return 1;}
-  int B=atoi(argv[1]), d=atoi(argv[2]); double gamma=atof(argv[3]);
-  double bp = argc>4? atof(argv[4]) : 5.0;
-  pascal();
-  std::vector<double> s(B+1);
-  for(int j=1;j<=B;j++) s[j]=std::pow((double)(j-1)/(B-1), gamma);
+    // ---- single-query latency ------------------------------------------------
+    const long ML = 100000; volatile double sink = 0;
+    for (int rep = 0; rep < reps; rep++) {
+        auto time = [&](auto fn) { auto t = clk::now(); for (long q = 0; q < ML; q++) sink = sink + fn(&X[(size_t)q * K]); return secs_since(t) * 1e9 / ML; };
+        double ns_near = time(nearest), ns_simp = time(simplex), ns_n1 = time(newton1);
+        double ns_newton = time([](const double* x) { return pl::p1_newton(x, K); });
+        double ns_bis = time([](const double* x) { return pl::p1_bisect(x, K); });
+        J("pl_bench").s("what", "latency").i("rep", rep).i("B", B).i("d", d).u("N", N)
+            .f("nearest_ns", ns_near).f("simplex_ns", ns_simp).f("newton1_ns", ns_n1).f("newton_ns", ns_newton).f("bisect_ns", ns_bis)
+            .f("speedup_nearest_newton", ns_newton / ns_near).f("speedup_simplex_newton", ns_newton / ns_simp).emit();
+    }
 
-  // ---- query set: the 2015 paper's generator ------------------------------
-  long N=200000; std::vector<double> X((size_t)N*KMAX);
-  { unsigned st=12345;
-    for(long q=0;q<N;q++){ double p=0; X[(size_t)q*KMAX]=0;
-      for(int i=1;i<KMAX;i++){
-        st=st*1103515245u+12345u; double r=p+((st>>16)/65535.0)*(1.0-p);
-        p=p+(r-p)/bp; X[(size_t)q*KMAX+i]=std::min(p,0.999999);
-      } } }
-
-  u64 M=C[B+d-2][d-1];
-  printf("B=%d d=%d gamma=%.1f b=%.1f  |U|=%llu (%.1f MB)  queries=%ld\n",
-         B,d,gamma,bp,(unsigned long long)M,M*4/1e6,N);
-  fflush(stdout);
-
-  // ---- build ---------------------------------------------------------------
-  auto t0=clk::now();
-  std::vector<float> tab(M);
-  { std::vector<int> c(d-1,1); std::vector<double> g(d);
-    for(u64 done=0;done<M;done++){
-      g[0]=0.0; for(int i=1;i<d;i++) g[i]=s[c[i-1]];
-      tab[rank_pin(c.data(),d,B)]=(float)p1_newton(g.data(),d);
-      int i=d-2; while(i>=0&&c[i]==B) i--;
-      if(i<0) break; c[i]++; for(int j=i+1;j<d-1;j++) c[j]=c[i];
-    } }
-  double build_s=std::chrono::duration<double>(clk::now()-t0).count();
-
-  // ---- accuracy ------------------------------------------------------------
-  std::vector<double> err(N); double bias=0,emax=0,emean=0;
-  { std::vector<int> c(d-1);
-    for(long q=0;q<N;q++){
-      const double* x=&X[(size_t)q*KMAX];
-      double tt=p1_newton(x,KMAX);
-      snap(x,d,B,s.data(),c.data());
-      double th=tab[rank_pin(c.data(),d,B)];
-      double e=th-tt; bias+=e; err[q]=std::fabs(e);
-      emax=std::max(emax,std::fabs(e)); emean+=std::fabs(e);
-    } }
-  bias/=N; emean/=N;
-  std::vector<double> se=err; std::sort(se.begin(),se.end());
-
-  // ---- latency (single-query, same language) -------------------------------
-  long Msub=std::min(N,100000L); std::vector<int> c(d-1); volatile double sink=0;
-  t0=clk::now();
-  for(long q=0;q<Msub;q++){ const double* x=&X[(size_t)q*KMAX];
-    snap(x,d,B,s.data(),c.data()); sink+=tab[rank_pin(c.data(),d,B)]; }
-  double lat_memo=std::chrono::duration<double,std::nano>(clk::now()-t0).count()/Msub;
-  t0=clk::now();
-  for(long q=0;q<Msub;q++) sink+=p1_newton(&X[(size_t)q*KMAX],KMAX);
-  double lat_newton=std::chrono::duration<double,std::nano>(clk::now()-t0).count()/Msub;
-  t0=clk::now();
-  for(long q=0;q<Msub;q++) sink+=p1_bisect(&X[(size_t)q*KMAX],KMAX);
-  double lat_bis=std::chrono::duration<double,std::nano>(clk::now()-t0).count()/Msub;
-
-  printf("  build=%.1fs\n",build_s);
-  printf("  p1 err: mean=%.2e p50=%.2e p99=%.2e max=%.2e | BIAS=%+.2e (%.3fx mean|err|)\n",
-         emean,se[N/2],se[(size_t)(0.99*(N-1))],emax,bias,std::fabs(bias)/emean);
-  printf("  latency ns/query: memo=%.0f  Newton=%.0f  bisect=%.0f  "
-         "-> memo speedup %.1fx (Newton), %.1fx (bisect)\n",
-         lat_memo,lat_newton,lat_bis,lat_newton/lat_memo,lat_bis/lat_memo);
-  (void)sink;
-  return 0;
+    // ---- bit identity with an independently built hash memo -------------------
+    if (verify_hash) {
+#ifdef HAVE_ABSL
+        Packer pack(B, ds);
+        const int SB = 10, S = 1 << SB;
+        std::vector<absl::flat_hash_map<u64, float>> sh_(S); std::vector<std::mutex> mu(S);
+        for (auto& x : sh_) x.reserve(N / S + N / S / 8 + 16);
+        auto sid = [&](u64 k) { return int(mix64(k) >> (64 - SB)); };
+        std::vector<std::thread> ws; std::vector<u64> bad(threads, 0), seen(threads, 0);
+        auto t1 = clk::now();
+        // phase 1: each worker enumerates its own key range, evaluates f afresh, inserts
+        for (int j = 0; j < threads; j++) ws.emplace_back([&, j] {
+            u64 lo = (unsigned __int128)N * j / threads, hi = (unsigned __int128)N * (j + 1) / threads;
+            if (lo >= hi) return;
+            int m[tg::MAX_D]; tg::unrank(lo, ds, B, m);
+            for (u64 r = lo; r < hi; r++) { u64 k = pack(m, ds); float v = pl::payload(m, ds, s);
+                { std::lock_guard<std::mutex> lk(mu[sid(k)]); sh_[sid(k)].emplace(k, v); } tg::next(m, ds, B); } });
+        for (auto& w : ws) w.join(); ws.clear();
+        // phase 2: every key, hash value vs array[rank(key)] bitwise
+        for (int j = 0; j < threads; j++) ws.emplace_back([&, j] {
+            u64 lo = (unsigned __int128)N * j / threads, hi = (unsigned __int128)N * (j + 1) / threads;
+            if (lo >= hi) return;
+            int m[tg::MAX_D]; tg::unrank(lo, ds, B, m);
+            for (u64 r = lo; r < hi; r++) { u64 k = pack(m, ds); auto it = sh_[sid(k)].find(k);
+                float a = arr[tg::rank(m, ds, B)];
+                if (it == sh_[sid(k)].end() || std::memcmp(&a, &it->second, 4) != 0 || tg::rank(m, ds, B) != r) bad[j]++;
+                seen[j]++; tg::next(m, ds, B); } });
+        for (auto& w : ws) w.join();
+        u64 nbad = 0, nseen = 0, nsize = 0; for (int j = 0; j < threads; j++) { nbad += bad[j]; nseen += seen[j]; }
+        for (auto& x : sh_) nsize += x.size();
+        // phase 3: every query through both memos
+        u64 qbad = 0;
+        for (long q = 0; q < NQ; q++) { int m[tg::MAX_D]; tg::snap_nearest(&X[(size_t)q * K] + 1, ds, sp, m);
+            float a = arr[tg::rank(m, ds, B)], h = sh_[sid(pack(m, ds))].find(pack(m, ds))->second;
+            if (std::memcmp(&a, &h, 4) != 0) qbad++; }
+        J("pl_bench").s("what", "verify_hash").i("B", B).i("d", d).u("N", N).u("keys_checked", nseen)
+            .u("hash_size", nsize).u("key_mismatches", nbad).i("queries_checked", NQ).u("query_mismatches", qbad)
+            .f("verify_s", secs_since(t1)).emit();
+        if (nbad || qbad || nsize != N) return 2;
+#else
+        std::fprintf(stderr, "verify_hash needs absl\n"); return 1;
+#endif
+    }
+    return 0;
 }

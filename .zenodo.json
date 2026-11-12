@@ -1,7 +1,7 @@
 {
   "title": "Tapered grid: reference implementation, benchmark code, and raw measurement logs",
   "upload_type": "software",
-  "description": "<p>Research artifact for <em>Memoization Without Keys: Compact, Out-of-Core Tables for Functions of Sorted Arguments</em>.</p><p>A memoization table for functions of a sorted argument whose influence decays with rank. Its keys are the combinations with repetition, so the array index is the lexicographic rank in the combinatorial number system. This gives a table-free closed-form O(d) rank, an O(d) unrank (so keys need never be stored and the table can be built by any number of threads with zero coordination), and a values-only flat array that is memory-mappable and usable past the limits of RAM at one disk access per query.</p><p>Contains the reference implementation, the warped/selective ranker, the C++ benchmarks (in-RAM, out-of-core, Plackett-Luce, alpha-entmax), the dataset regeneration script, and the raw measurement logs for every experiment reported in the paper.</p><p>Follow-up to Biswas &amp; Regan, <em>Approximation of function evaluation over sequence arguments via specialized data structures</em>, Theoretical Computer Science 607 (2015) 113-123.</p>",
+  "description": "<p>Research artifact for <em>Memoization Without Keys: Compact, Out-of-Core Tables for Functions of Sorted Arguments</em>.</p><p><code>tg.hpp</code> is a header-only C++17 memo table for functions of a sorted argument. It stores values only: an entry's address is the lexicographic rank of its sorted argument, computed in O(d) from one shared Pascal table and invertible. A table lives in memory or in a memory-mapped file with a self-describing header, can be filled by any number of threads that each own a range of indices, and answers single, batched and simplex-interpolated lookups.</p><p>Contains the library and its tests; every benchmark (in-memory lookups, parallel construction, out-of-core serving, the vector root, an end-to-end maximum-likelihood fit, alpha-entmax); the runner; the raw JSON logs behind every measured number in the paper; and the scripts that regenerate the paper's numbers, tables and figures from those logs. <code>make verify</code> runs the correctness checks and <code>make check-numbers</code> compares the regenerated numbers with the paper's.</p><p>Follow-up to Biswas &amp; Regan, <em>Approximation of function evaluation over sequence arguments via specialized data structures</em>, Theoretical Computer Science 607 (2015) 113-123.</p>",
   "creators": [
     {
       "name": "Maharaj, Tamal",
@@ -14,12 +14,11 @@
     "memoization",
     "combinatorial number system",
     "ranking and unranking",
-    "succinct data structures",
+    "lookup tables",
     "external memory",
-    "Plackett-Luce",
-    "algorithm engineering",
     "memory-mapped I/O",
-    "experimental algorithmics"
+    "algorithm engineering",
+    "experimental evaluation"
   ],
   "related_identifiers": [
     {

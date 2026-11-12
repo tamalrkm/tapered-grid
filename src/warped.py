@@ -162,7 +162,7 @@ if __name__ == "__main__":
     cols = [round(16*x)+1 for x in u]            # 1,2,5,9,13
     idx = paper_index(cols, B, d, r, V)
     print(f"[A] paper Example 2 index = {idx}  (published: 400)  "
-          f"{'OK' if idx==400 else 'MISMATCH'}")
+          f"{'OK' if idx==400 else 'differs, as expected: the literal Eq. (7) does not give it; see [B]'}")
 
     # ---- clean nested ranker on the same configuration ----
     S = nested_alphabets(B, d, r)

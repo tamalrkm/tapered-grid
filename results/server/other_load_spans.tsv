@@ -1,0 +1,12 @@
+# Approximate wall-clock span of each plan in the final server run (UTC, 2026-11-12),
+# reconstructed from the cumulative wall_s of the runner's log, starting at the end of the
+# runner's verify step (06:18:03Z); the reconstruction meets the logged end time
+# (11:09:29Z) to within about a minute. Used with other_load.tsv by analysis/make_numbers.py.
+plan	start	end
+h2h	06:18	06:24
+pages	06:24	06:26
+window	06:26	06:30
+sweep	06:30	08:07
+parallel	08:07	10:58
+pl	10:58	11:00
+plfit	11:00	11:09

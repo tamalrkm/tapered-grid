@@ -1,207 +1,235 @@
-// Out-of-core benchmark: tapered flat array BIGGER THAN RAM on an HDD laptop.
+// Out-of-core serving and locality on a tg table file larger than RAM.
 //
-// The regime: value file (4N bytes) > total RAM, rotational disk. A point query
-// = O(d) in-cache rank arithmetic + exactly ONE file access (page fault -> one
-// ~8ms seek on HDD, or a page-cache hit). Any key-storing structure at this N
-// cannot exist in RAM at all (measured hash footprint 43.5 B/entry -> ~242 GB),
-// and on disk would pay >=2 DEPENDENT accesses per query (bucket + node).
+// usage:
+//   ooc_bench build B d [path]                 stream-write header + payload (value_of)
+//   ooc_bench scan  B d [path]                 sequential read, verify every payload
+//                                              and the header's payload hash
+//   ooc_bench query B d M seed [path] [evict=1] [W]
+//                                              M random point queries (mmap, MADV_RANDOM);
+//                                              evict=0 leaves the page cache as it is
+//   ooc_bench walk  B d M seed lex|hashed [W] [path]
+//                   one coordinate +-1 per step, coordinate uniform
+//   ooc_bench gauss B d M seed lex|hashed sigma [W] [path]
+//                   every coordinate moves by round(sigma*Z) per step, then sorted
+//   ooc_bench trace B d tracefile lex|hashed [W] [path]
+//                   replay a trace of 16-byte records {u64 rank; i64 lead}, where
+//                   lead is the first coordinate (0-based) that differs from the
+//                   same item's previous query, -1 if none (pl_fit --trace-out)
 //
-// Modes (chain them: build && scan && query):
-//   build  <B> <d>            create + fill file by rank (sequential write)
-//   scan   <B> <d>            full sequential read verifying EVERY payload
-//                             (= 100% correctness check + streaming-aggregate rate)
-//   query  <B> <d> <M> <seed> M random sorted-key point queries via mmap,
-//                             per-query latency distribution (bimodal: cache/disk)
-//   walk   <B> <d> <M> <seed> lex|hashed
-//                             M queries along a random walk in key space (one
-//                             coordinate +-1 per step), addressed either by the
-//                             lexicographic rank (this paper) or by a 64-bit
-//                             mix of the key (what any hash-addressed layout
-//                             does). Page-cache hits are decided by mincore()
-//                             BEFORE the access, not by timing.
+// W = 0 is a cold start. W < 0 is a warm start: the stream's first -W steps are
+// generated but not replayed. Their most recent distinct pages, as many as fit in
+// 90% of the available memory, are read in address order, which leaves the cache as
+// a long run would have left it without hours of seeks; then M steps are measured.
 //
-// build: g++ -O3 -march=native -o ooc_bench ooc_bench.cpp
-#include <cstdio>
-#include <cstdlib>
+// "hashed" addresses the same key by mix64(rank) mod N, as any hash-addressed
+// layout would. A page-cache hit is decided by mincore() on the target page
+// before the access, not by timing. The file is evicted with
+// posix_fadvise(DONTNEED) before every run except where noted.
+#include "common.hpp"
+#include "tg.hpp"
 #include <cmath>
-#include <cstring>
-#include <cstdint>
-#include <string>
-#include <vector>
-#include <algorithm>
-#include <chrono>
 #include <fcntl.h>
-#include <unistd.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
+#include <unistd.h>
 
-using u64 = uint64_t;
-using clk = std::chrono::steady_clock;
-static const char* PATH = "ooc_memo.bin";
+static const char* DEFAULT_PATH = "ooc_memo.tg";
 
-static u64 C[64][64];
-static void pascal(){ for(int n=0;n<64;n++){C[n][0]=1;
-  for(int k=1;k<=n;k++)C[n][k]=C[n-1][k-1]+(k<=n-1?C[n-1][k]:0);} }
+static void evict(int fd) { fdatasync(fd); posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED); }
 
-static inline u64 rank_fixed(const int* cols,int d,int B){
-  int mp=1; u64 r=0;
-  for(int i=1;i<=d;i++){ int mi=cols[i-1],k=d-i;
-    r+=C[B-mp+k+1][k+1]-C[B-mi+k+1][k+1]; mp=mi; }
-  return r;
-}
-static inline float value_of(u64 r){
-  u64 h=r*2654435761ull; return float(h&0xFFFFFF)*(1.0f/16777216.0f);
-}
-static inline u64 xs(u64&s){ s^=s<<13; s^=s>>7; s^=s<<17; return s; }
-static void gen_query(u64&s,int d,int B,int*out){
-  for(int i=0;i<d;i++) out[i]=int(xs(s)%B)+1;
-  std::sort(out,out+d);
+static double resident_pct(const void* p, size_t bytes) {
+    size_t pages = (bytes + 4095) / 4096; std::vector<unsigned char> v(pages);
+    if (mincore(const_cast<void*>(p), bytes, v.data()) != 0) return -1;
+    size_t r = 0; for (auto c : v) r += c & 1; return 100.0 * r / pages;
 }
 
-int main(int argc,char**argv){
-  if(argc<4){fprintf(stderr,"usage: %s build|scan|query|walk B d [M seed [lex|hashed]]\n",argv[0]);return 1;}
-  std::string mode=argv[1]; int B=atoi(argv[2]), d=atoi(argv[3]);
-  pascal();
-  u64 N=C[B+d-1][d];
-  double gb=double(N)*4/1e9;
-  printf("[%s] B=%d d=%d  N=%llu  file=%.2f GB\n",mode.c_str(),B,d,(unsigned long long)N,gb);
-  fflush(stdout);
+static std::string csv(const std::vector<double>& v) {
+    std::string s; char t[32];
+    for (size_t i = 0; i < v.size(); i++) { std::snprintf(t, sizeof t, "%s%.1f", i ? "," : "", v[i]); s += t; }
+    return s;
+}
 
-  if(mode=="build"){
-    auto t0=clk::now();
-    int fd=open(PATH,O_WRONLY|O_CREAT|O_TRUNC,0644);
-    if(fd<0){perror("open");return 1;}
-    const u64 CHUNK=1u<<20;                     // 1M floats = 4MB
-    std::vector<float> buf(CHUNK);
-    for(u64 base=0;base<N;base+=CHUNK){
-      u64 n=std::min(CHUNK,N-base);
-      for(u64 j=0;j<n;j++) buf[j]=value_of(base+j);
-      if(write(fd,buf.data(),n*4)!=(ssize_t)(n*4)){perror("write");return 1;}
-      if(((base/CHUNK)&255)==255)               // every ~1GB: flush + drop cache
-        { fdatasync(fd); posix_fadvise(fd,0,0,POSIX_FADV_DONTNEED); }
-    }
-    fdatasync(fd); posix_fadvise(fd,0,0,POSIX_FADV_DONTNEED); close(fd);
-    double s=std::chrono::duration<double>(clk::now()-t0).count();
-    printf("  build=%.1fs  (%.0f Mentries/s, %.0f MB/s)\n",s,N/s/1e6,gb*1000/s);
-  }
-  else if(mode=="scan"){
-    auto t0=clk::now();
-    int fd=open(PATH,O_RDONLY); if(fd<0){perror("open");return 1;}
-    posix_fadvise(fd,0,0,POSIX_FADV_SEQUENTIAL);
-    const u64 CHUNK=1u<<20; std::vector<float> buf(CHUNK);
-    u64 bad=0; double acc=0;
-    for(u64 base=0;base<N;base+=CHUNK){
-      u64 n=std::min(CHUNK,N-base);
-      if(read(fd,buf.data(),n*4)!=(ssize_t)(n*4)){perror("read");return 1;}
-      for(u64 j=0;j<n;j++){ if(buf[j]!=value_of(base+j)) bad++; acc+=buf[j]; }
-    }
-    close(fd);
-    double s=std::chrono::duration<double>(clk::now()-t0).count();
-    printf("  scan=%.1fs  (%.1f Mentries/s streamed)  MISMATCHES=%llu  acc=%.3f\n",
-           s,N/s/1e6,(unsigned long long)bad,acc);
-  }
-  else if(mode=="query"){
-    long M = argc>4?atol(argv[4]):20000;
-    u64 seed = argc>5?atoll(argv[5]):42;
-    // pre-generate keys + ranks (excluded from timing)
-    std::vector<u64> ranks(M);
-    { u64 s=seed|1; std::vector<int> c(d);
-      for(long q=0;q<M;q++){ gen_query(s,d,B,c.data()); ranks[q]=rank_fixed(c.data(),d,B); } }
-    int fd=open(PATH,O_RDONLY); if(fd<0){perror("open");return 1;}
-    float* arr=(float*)mmap(nullptr,N*4,PROT_READ,MAP_SHARED,fd,0);
-    if(arr==MAP_FAILED){perror("mmap");return 1;}
-    madvise(arr,N*4,MADV_RANDOM);
-    std::vector<double> lat(M); double checksum=0;
-    auto T0=clk::now();
-    for(long q=0;q<M;q++){
-      auto t0=clk::now();
-      checksum+=arr[ranks[q]];
-      lat[q]=std::chrono::duration<double,std::micro>(clk::now()-t0).count();
-    }
-    double total=std::chrono::duration<double>(clk::now()-T0).count();
-    munmap(arr,N*4); close(fd);
-    // correctness on the sampled ranks
-    u64 bad=0; for(long q=0;q<M;q++){} // values checked via checksum vs recompute:
-    double expect=0; for(long q=0;q<M;q++) expect+=value_of(ranks[q]);
-    std::vector<double> sorted=lat; std::sort(sorted.begin(),sorted.end());
-    auto pct=[&](double p){ return sorted[size_t(p*(M-1))]; };
-    long hits=0; for(long q=0;q<M;q++) if(lat[q]<100.0) hits++;   // <100us = page-cache
-    printf("  M=%ld  total=%.1fs  mean=%.0fus  p50=%.0fus p90=%.0fus p99=%.0fus\n",
-           M,total,1e6*total/M,pct(.50),pct(.90),pct(.99));
-    printf("  cache-hit(<100us)=%.1f%%  disk(>=100us)=%.1f%%  disk-mean=%.1fms\n",
-           100.0*hits/M,100.0*(M-hits)/M,
-           [&]{double s=0;long n=0;for(long q=0;q<M;q++)if(lat[q]>=100){s+=lat[q];n++;}return n? s/n/1000:0;}());
-    printf("  checksum=%.6f expect=%.6f  %s\n",checksum,expect,
-           fabs(checksum-expect)<1e-3?"CORRECT":"MISMATCH");
-    (void)bad;
-  }
+static double mem_available_bytes() {
+    FILE* f = std::fopen("/proc/meminfo", "r"); char line[256]; long kb = 0;
+    if (f) { while (std::fgets(line, sizeof line, f)) if (std::sscanf(line, "MemAvailable: %ld", &kb) == 1) break; std::fclose(f); }
+    return kb * 1024.0;
+}
 
-  else if(mode=="walk"){
-    long M = argc>4?atol(argv[4]):20000;
-    u64 seed = argc>5?atoll(argv[5]):42;
-    std::string addr = argc>6?argv[6]:"lex";
-    bool hashed = (addr=="hashed");
-    auto mix64=[](u64 x){ x+=0x9e3779b97f4a7c15ull; x=(x^(x>>30))*0xbf58476d1ce4e5b9ull;
-      x=(x^(x>>27))*0x94d049bb133111ebull; return x^(x>>31); };
-    // ---- generate the walk (excluded from timing) ----
-    std::vector<u64> ranks(M), addrs(M); std::vector<int> coord(M);
-    { u64 s=seed|1; std::vector<int> c(d); gen_query(s,d,B,c.data());
-      long q=0, tries=0;
-      while(q<M){
-        tries++;
-        int i=int(xs(s)%d); int sg=(xs(s)&1)?1:-1; int v=c[i]+sg;
-        bool ok = v>=1 && v<=B && (i==0||c[i-1]<=v) && (i==d-1||v<=c[i+1]);
-        if(!ok) continue;
-        c[i]=v; ranks[q]=rank_fixed(c.data(),d,B); coord[q]=i;
-        addrs[q]= hashed ? (mix64(ranks[q])%N) : ranks[q];
-        q++;
-      }
-      printf("  walk: %ld steps (%ld proposals), addressing=%s\n",M,tries,addr.c_str());
+// Replays a sequence of (rank, leading changed coordinate) against the mapped
+// file. Steps [0, W) are warm-up, [W, W+M) are measured.
+struct Step { u64 rank; int coord; };
+
+// Brings in the most recent distinct pages of steps [0, W), newest first until the
+// cache is full, then reads them in address order. Returns the number of pages.
+static size_t prewarm(int fd, const float* arr, const std::vector<Step>& steps, long W, bool hashed, u64 N) {
+    const size_t cap = size_t(0.9 * mem_available_bytes() / 4096);
+    std::vector<bool> seen(N * 4 / 4096 + 1, false);
+    std::vector<u64> pages;
+    for (long q = W - 1; q >= 0 && pages.size() < cap; q--) {
+        u64 addr = hashed ? mix64(steps[q].rank) % N : steps[q].rank, pg = addr * 4 / 4096;
+        if (!seen[pg]) { seen[pg] = true; pages.push_back(pg); }
     }
-    // ---- open, evict, measure residency before the run ----
-    int fd=open(PATH,O_RDONLY); if(fd<0){perror("open");return 1;}
-    posix_fadvise(fd,0,0,POSIX_FADV_DONTNEED);
-    float* arr=(float*)mmap(nullptr,N*4,PROT_READ,MAP_SHARED,fd,0);
-    if(arr==MAP_FAILED){perror("mmap");return 1;}
-    madvise(arr,N*4,MADV_RANDOM);
-    const u64 PG=4096, pages=(N*4+PG-1)/PG;
-    { std::vector<unsigned char> vec(pages); u64 res=0;
-      if(mincore(arr,N*4,vec.data())==0){ for(u64 i=0;i<pages;i++) res+=vec[i]&1; }
-      printf("  resident before run: %.2f%% of %llu pages\n",100.0*res/pages,(unsigned long long)pages); }
-    // ---- run ----
-    std::vector<double> lat(M); std::vector<char> hit(M); double checksum=0;
-    std::vector<long> stepsPer(d,0), hitsPer(d,0), samePagePer(d,0);
-    u64 prevPage=~0ull; long samePage=0;
-    auto T0=clk::now();
-    for(long q=0;q<M;q++){
-      u64 a=addrs[q]; u64 pg=(a*4)/PG;
-      unsigned char v=0; char* pa=(char*)arr+pg*PG;
-      mincore(pa,PG,&v); hit[q]=(v&1)?1:0;
-      auto t0=clk::now();
-      checksum+=arr[a];
-      lat[q]=std::chrono::duration<double,std::micro>(clk::now()-t0).count();
-      stepsPer[coord[q]]++; if(hit[q]) hitsPer[coord[q]]++;
-      if(pg==prevPage){ samePage++; samePagePer[coord[q]]++; }
-      prevPage=pg;
+    std::sort(pages.begin(), pages.end());
+    for (u64 pg : pages) posix_fadvise(fd, off_t(4096 + pg * 4096), 4096, POSIX_FADV_WILLNEED);
+    volatile float sink = 0;
+    for (u64 pg : pages) sink = arr[pg * 1024];
+    (void)sink;
+    return pages.size();
+}
+static void replay(const char* kind, const std::string& path, int B, int d, const std::vector<Step>& steps,
+                   long W, bool hashed, u64 seed, double sigma, bool do_evict) {
+    auto t = tg::Table<float>::open(path, tg::Access::random);
+    const u64 N = t.size(); const float* arr = t.data();
+    if (do_evict) evict(t.fd());
+    const long start = W < 0 ? -W : 0;            // steps [0, start) are only prewarmed
+    const size_t warmed = start ? prewarm(t.fd(), arr, steps, start, hashed, N) : 0;
+    const long W_arg = W;
+    if (W < 0) W = 0;
+    double res0 = resident_pct(arr, N * 4);
+    const int NC = d + 1;                         // coord buckets 0..d-1, d = "no change"
+    struct Acc { long n = 0, hit = 0, same = 0; double s_hit = 0, s_miss = 0; std::vector<long> n_c, h_c, sp_c;
+                 std::vector<double> lat; };
+    Acc ph[2]; for (auto& a : ph) { a.n_c.assign(NC, 0); a.h_c.assign(NC, 0); a.sp_c.assign(NC, 0); }
+    u64 prev_page = ~0ull; double checksum = 0, expect = 0;
+    std::vector<u64> pages_measured;
+    auto T0 = clk::now();
+    for (size_t q = start; q < steps.size(); q++) {
+        Acc& a = ph[(long)q < W ? 0 : 1];
+        u64 addr = hashed ? mix64(steps[q].rank) % N : steps[q].rank;
+        u64 pg = addr * 4 / 4096;
+        unsigned char v = 0; mincore((void*)((const char*)arr + pg * 4096), 4096, &v);
+        bool hit = v & 1;
+        auto t0 = clk::now();
+        checksum += arr[addr];
+        double us = std::chrono::duration<double, std::micro>(clk::now() - t0).count();
+        expect += value_of(addr);
+        int c = steps[q].coord < 0 ? d : steps[q].coord;
+        a.n++; a.n_c[c]++; a.lat.push_back(us);
+        if (hit) { a.hit++; a.h_c[c]++; a.s_hit += us; } else a.s_miss += us;
+        if (pg == prev_page) { a.same++; a.sp_c[c]++; }
+        prev_page = pg;
+        if ((long)q >= W) pages_measured.push_back(pg);
     }
-    double total=std::chrono::duration<double>(clk::now()-T0).count();
-    // distinct pages touched
-    { std::vector<u64> pgs(M); for(long q=0;q<M;q++) pgs[q]=(addrs[q]*4)/PG;
-      std::sort(pgs.begin(),pgs.end()); long distinct=std::unique(pgs.begin(),pgs.end())-pgs.begin();
-      printf("  distinct pages touched: %ld of %ld steps\n",distinct,M); }
-    munmap(arr,N*4); close(fd);
-    long hits=0; double sHit=0,sMiss=0; long nMiss=0;
-    for(long q=0;q<M;q++){ if(hit[q]){hits++;sHit+=lat[q];} else {nMiss++;sMiss+=lat[q];} }
-    std::vector<double> sorted=lat; std::sort(sorted.begin(),sorted.end());
-    auto pct=[&](double p){ return sorted[size_t(p*(M-1))]; };
-    printf("  M=%ld total=%.1fs mean=%.0fus p50=%.0fus p90=%.0fus p99=%.0fus\n",M,total,1e6*total/M,pct(.5),pct(.9),pct(.99));
-    printf("  page-cache hit (mincore) = %.1f%%   same-page-as-previous = %.1f%%\n",100.0*hits/M,100.0*samePage/M);
-    printf("  hit-mean=%.1fus  miss-mean=%.2fms (n=%ld)\n",hits?sHit/hits:0,nMiss?sMiss/nMiss/1000:0,nMiss);
-    printf("  per-coordinate (1=leading): coord steps hit%% samepage%%\n");
-    for(int i=0;i<d;i++) printf("    %2d %6ld %6.1f %6.1f\n",i+1,stepsPer[i],stepsPer[i]?100.0*hitsPer[i]/stepsPer[i]:0,stepsPer[i]?100.0*samePagePer[i]/stepsPer[i]:0);
-    double expect=0; for(long q=0;q<M;q++) expect+=value_of(ranks[q]*(hashed?0:1)+(hashed?addrs[q]:0));
-    printf("  checksum=%.6f expect=%.6f  %s\n",checksum,expect,fabs(checksum-expect)<1e-3?"CORRECT":"MISMATCH");
-  }
-  else { fprintf(stderr,"unknown mode\n"); return 1; }
-  return 0;
+    double total = secs_since(T0);
+    std::sort(pages_measured.begin(), pages_measured.end());
+    long distinct = std::unique(pages_measured.begin(), pages_measured.end()) - pages_measured.begin();
+    for (int p = 0; p < 2; p++) {
+        Acc& a = ph[p]; if (!a.n) continue;
+        std::vector<double> sl = a.lat; std::sort(sl.begin(), sl.end());
+        auto pct = [&](double x) { return sl[size_t(x * (sl.size() - 1))]; };
+        double mean = 0; for (double x : a.lat) mean += x; mean /= a.n;
+        std::vector<double> hc(NC), spc(NC), nc(NC);
+        for (int c = 0; c < NC; c++) { nc[c] = a.n_c[c]; hc[c] = a.n_c[c] ? 100.0 * a.h_c[c] / a.n_c[c] : -1;
+                                       spc[c] = a.n_c[c] ? 100.0 * a.sp_c[c] / a.n_c[c] : -1; }
+        long miss = a.n - a.hit;
+        J("ooc_bench").s("mode", kind).s("addressing", hashed ? "hashed" : "lex").s("phase", p ? "measured" : "warmup")
+            .i("B", B).i("d", d).u("N", N).i("M", a.n).i("W", W_arg).u("seed", seed).f("sigma", sigma)
+            .i("evicted", do_evict).f("resident_before_pct", res0).u("warm_pages", warmed)
+            .f("hit_pct", 100.0 * a.hit / a.n).f("same_page_pct", 100.0 * a.same / a.n)
+            .i("distinct_pages", p ? distinct : -1)
+            .f("mean_us", mean).f("p50_us", pct(.5)).f("p90_us", pct(.9)).f("p99_us", pct(.99))
+            .f("hit_mean_us", a.hit ? a.s_hit / a.hit : 0).f("miss_mean_ms", miss ? a.s_miss / miss / 1000 : 0)
+            .f("total_s", total).s("steps_by_coord", csv(nc)).s("hit_pct_by_coord", csv(hc))
+            .s("same_page_pct_by_coord", csv(spc))
+            .s("checksum_ok", std::fabs(checksum - expect) < 1e-3 * (1 + std::fabs(expect)) ? "yes" : "NO").emit();
+    }
+}
+
+int main(int argc, char** argv) {
+    if (argc < 4) { std::fprintf(stderr, "usage: %s build|scan|query|walk|gauss|trace B d ...\n", argv[0]); return 1; }
+    std::string mode = argv[1]; int B = atoi(argv[2]), d = atoi(argv[3]);
+    tg::Shape sh{B, d};
+    if (!sh.valid()) { std::fprintf(stderr, "invalid shape\n"); return 1; }
+    const u64 N = sh.size();
+    auto arg = [&](int i, const char* def) { return argc > i ? std::string(argv[i]) : std::string(def); };
+
+    if (mode == "build") {
+        std::string path = arg(4, DEFAULT_PATH);
+        auto t0 = clk::now();
+        int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd < 0) { perror("open"); return 1; }
+        tg::Header h = tg::make_header<float>(sh, tg::Meta(), 0);
+        if (write(fd, &h, sizeof h) != (ssize_t)sizeof h) { perror("write"); return 1; }
+        const u64 CH = 1u << 20; std::vector<float> buf(CH); uint64_t hh = 1469598103934665603ull;
+        for (u64 base = 0; base < N; base += CH) {
+            u64 n = std::min(CH, N - base);
+            for (u64 j = 0; j < n; j++) buf[j] = value_of(base + j);
+            hh = tg::hash_bytes(buf.data(), n * 4, hh);       // chunks are multiples of 8 bytes except the last
+            if (write(fd, buf.data(), n * 4) != (ssize_t)(n * 4)) { perror("write"); return 1; }
+            if (((base / CH) & 255) == 255) evict(fd);          // every ~1 GB: flush and drop
+        }
+        h = tg::make_header<float>(sh, tg::Meta(), hh);
+        if (pwrite(fd, &h, sizeof h, 0) != (ssize_t)sizeof h) { perror("pwrite"); return 1; }
+        evict(fd); close(fd);
+        double s = secs_since(t0);
+        J("ooc_bench").s("mode", "build").i("B", B).i("d", d).u("N", N).f("file_gb", (N * 4.0 + 4096) / 1e9)
+            .f("build_s", s).f("entries_per_s", N / s).emit();
+    } else if (mode == "scan") {
+        std::string path = arg(4, DEFAULT_PATH);
+        auto t0 = clk::now();
+        { auto t = tg::Table<float>::open(path, tg::Access::sequential); (void)t; }   // header checks
+        int fd = open(path.c_str(), O_RDONLY); posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+        tg::Header h; if (pread(fd, &h, sizeof h, 0) != (ssize_t)sizeof h) { perror("pread"); return 1; }
+        if (lseek(fd, 4096, SEEK_SET) < 0) { perror("lseek"); return 1; }
+        const u64 CH = 1u << 20; std::vector<float> buf(CH); u64 bad = 0; uint64_t hh = 1469598103934665603ull;
+        for (u64 base = 0; base < N; base += CH) {
+            u64 n = std::min(CH, N - base);
+            if (read(fd, buf.data(), n * 4) != (ssize_t)(n * 4)) { perror("read"); return 1; }
+            hh = tg::hash_bytes(buf.data(), n * 4, hh);
+            for (u64 j = 0; j < n; j++) if (buf[j] != value_of(base + j)) bad++;
+        }
+        close(fd);
+        double s = secs_since(t0);
+        J("ooc_bench").s("mode", "scan").i("B", B).i("d", d).u("N", N).f("scan_s", s).f("entries_per_s", N / s)
+            .u("mismatches", bad).s("payload_hash_ok", hh == h.payload_hash ? "yes" : "NO").emit();
+        return bad ? 2 : 0;
+    } else if (mode == "query") {
+        long M = atol(arg(4, "20000").c_str()); u64 seed = strtoull(arg(5, "42").c_str(), 0, 10);
+        std::string path = arg(6, DEFAULT_PATH); bool ev = arg(7, "1") != "0"; long W = atol(arg(8, "0").c_str());
+        const long T = M + (W < 0 ? -W : 0);
+        std::vector<Step> steps(T);
+        { u64 s = seed | 1; std::vector<int> c(d); for (long q = 0; q < T; q++) { gen_query(s, d, B, c.data()); steps[q] = {tg::rank(c.data(), d, B), -1}; } }
+        replay("query", path, B, d, steps, W, false, seed, 0, ev);
+    } else if (mode == "walk" || mode == "gauss") {
+        long M = atol(arg(4, "20000").c_str()); u64 seed = strtoull(arg(5, "42").c_str(), 0, 10);
+        bool hashed = arg(6, "lex") == "hashed";
+        int k = 7; double sigma = 0;
+        if (mode == "gauss") sigma = atof(arg(k++, "0.5").c_str());
+        long W = atol(arg(k++, "0").c_str());
+        std::string path = arg(k, DEFAULT_PATH);
+        const long total = M + (W < 0 ? -W : W);
+        std::vector<Step> steps; steps.reserve(total);
+        u64 s = seed | 1; std::vector<int> c(d), c2(d);
+        gen_query(s, d, B, c.data());
+        auto unif = [&]() { return (xs(s) >> 11) * (1.0 / 9007199254740992.0); };
+        while ((long)steps.size() < total) {
+            if (mode == "walk") {
+                int i = int(xs(s) % d), sg = (xs(s) & 1) ? 1 : -1, v = c[i] + sg;
+                bool ok = v >= 1 && v <= B && (i == 0 || c[i-1] <= v) && (i == d - 1 || v <= c[i+1]);
+                if (!ok) continue;
+                c[i] = v; steps.push_back({tg::rank(c.data(), d, B), i});
+            } else {
+                for (int i = 0; i < d; i++) {
+                    double u1 = std::max(unif(), 1e-300), u2 = unif();
+                    double z = std::sqrt(-2 * std::log(u1)) * std::cos(6.283185307179586 * u2);
+                    c2[i] = std::min(B, std::max(1, c[i] + (int)std::lround(sigma * z)));
+                }
+                std::sort(c2.begin(), c2.end());
+                int lead = -1; for (int i = 0; i < d; i++) if (c2[i] != c[i]) { lead = i; break; }
+                c = c2; steps.push_back({tg::rank(c.data(), d, B), lead});
+            }
+        }
+        replay(mode.c_str(), path, B, d, steps, W, hashed, seed, sigma, true);
+    } else if (mode == "trace") {
+        std::string tf = arg(4, "trace.u64"); bool hashed = arg(5, "lex") == "hashed";
+        long W = atol(arg(6, "0").c_str()); std::string path = arg(7, DEFAULT_PATH);
+        FILE* f = std::fopen(tf.c_str(), "rb"); if (!f) { perror("trace"); return 1; }
+        std::vector<Step> steps; struct { u64 r; int64_t lead; } rec;
+        while (std::fread(&rec, sizeof rec, 1, f) == 1) {
+            if (rec.r >= N || rec.lead >= d) { std::fprintf(stderr, "trace record out of range\n"); return 1; }
+            steps.push_back({rec.r, (int)rec.lead});
+        }
+        std::fclose(f);
+        replay("trace", path, B, d, steps, W, hashed, 0, 0, true);
+    } else { std::fprintf(stderr, "unknown mode\n"); return 1; }
+    return 0;
 }
