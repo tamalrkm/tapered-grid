@@ -7,8 +7,8 @@ Luce RD. {\it Individual Choice Behavior: A Theoretical Analysis}.
 
 \bibitem{biswas2015}
 Biswas TT, Regan KW. Approximation of function evaluation over sequence
-  arguments via specialized data structures. {\it Theoretical Computer
-  Science.} 2015\string;607\string:113--123.
+  arguments via specialized data structures. {\it Theor Comput Sci.}
+  2015\string;607\string:113--123.
 \newblock \href {\doibase 10.1016/j.tcs.2015.03.049} {doi:
   10.1016/j.tcs.2015.03.049}
 
@@ -23,7 +23,7 @@ Lehmer DH. The machine tools of combinatorics. In: Applied Combinatorial
 
 \bibitem{buckles1977}
 Buckles BP, Lybanon M. Algorithm 515: Generation of a vector from the
-  lexicographical index. {\it ACM Transactions on Mathematical Software.}
+  lexicographical index. {\it ACM Trans Math Softw.}
   1977\string;3(2)\string:180--182.
 \newblock \href {\doibase 10.1145/355732.355739} {doi: 10.1145/355732.355739}
 
@@ -44,27 +44,38 @@ Jacobson G. Space-efficient static trees and graphs. In: 30th Annual Symposium
 
 \bibitem{raman2007}
 Raman R, Raman V, Satti SR. Succinct indexable dictionaries with applications
-  to encoding $k$-ary trees, prefix sums and multisets. {\it ACM Transactions
-  on Algorithms.} 2007\string;3(4)\string:43.
+  to encoding $k$-ary trees, prefix sums and multisets. {\it ACM Trans
+  Algorithms.} 2007\string;3(4)\string:43.
 \newblock \href {\doibase 10.1145/1290672.1290680} {doi:
   10.1145/1290672.1290680}
 
 \bibitem{freudenthal1942}
-Freudenthal H. Simplizialzerlegungen von beschr{\"a}nkter {F}lachheit. {\it
-  Annals of Mathematics.} 1942\string;43(3)\string:580--582.
+Freudenthal H. Simplizialzerlegungen von beschr{\"a}nkter {F}lachheit. {\it Ann
+  Math.} 1942\string;43(3)\string:580--582.
 \newblock \href {\doibase 10.2307/1968813} {doi: 10.2307/1968813}
 
 \bibitem{kuhn1960}
-Kuhn HW. Some combinatorial lemmas in topology. {\it IBM Journal of Research
-  and Development.} 1960\string;4(5)\string:518--524.
+Kuhn HW. Some combinatorial lemmas in topology. {\it IBM J Res Dev.}
+  1960\string;4(5)\string:518--524.
 \newblock \href {\doibase 10.1147/rd.45.0518} {doi: 10.1147/rd.45.0518}
 
 \bibitem{weiser1988}
 Weiser A, Zarantonello SE. A note on piecewise linear and multilinear table
-  interpolation in many dimensions. {\it Mathematics of Computation.}
+  interpolation in many dimensions. {\it Math Comput.}
   1988\string;50(181)\string:189--196.
 \newblock \href {\doibase 10.1090/S0025-5718-1988-0917826-0} {doi:
   10.1090/S0025-5718-1988-0917826-0}
+
+\bibitem{pagh2001}
+Pagh R. Low redundancy in static dictionaries with constant query time. {\it
+  SIAM J Comput.} 2001\string;31(2)\string:353--363.
+\newblock \href {\doibase 10.1137/S0097539700369909} {doi:
+  10.1137/S0097539700369909}
+
+\bibitem{dietzfelbinger2008}
+Dietzfelbinger M, Pagh R. Succinct data structures for retrieval and
+  approximate membership. In: Automata, Languages and Programming (ICALP 2008).
+  Springer 2008\string:385--396.
 
 \bibitem{pibiri2021}
 Pibiri GE, Trani R. {PTHash}: revisiting {FCH} minimal perfect hashing. In:
@@ -91,7 +102,7 @@ Belazzougui D, Boldi P, Pagh R, Vigna S. Monotone minimal perfect hashing:
 Abseil {C++} common libraries: {Swiss} tables and
   \texttt{absl::flat\_hash\_map}.
   \url{https://abseil.io/docs/cpp/guides/container};  2025.
-\newblock LTS release 20250512.
+\newblock LTS release 20250512.1.
 
 \bibitem{boostunordered}
 {L{\'o}pez Mu{\~n}oz} JM, Mazakas C, Dimov P. {Boost.Unordered}:
@@ -104,7 +115,7 @@ Chou Y, Fahs B, Abraham S. Microarchitecture optimizations for exploiting
   Architecture. IEEE 2004\string:76--87.
 
 \bibitem{comer1979}
-Comer D. The ubiquitous {B}-tree. {\it ACM Computing Surveys.}
+Comer D. The ubiquitous {B}-tree. {\it ACM Comput Surv.}
   1979\string;11(2)\string:121--137.
 \newblock \href {\doibase 10.1145/356770.356776} {doi: 10.1145/356770.356776}
 
@@ -114,31 +125,20 @@ Gon{\c c}alves N, Treviso M, Martins AFT. {AdaSplash}: adaptive sparse flash
 \newblock arXiv:2502.12082.
 
 \bibitem{cover1973}
-Cover TM. Enumerative source encoding. {\it IEEE Transactions on Information
-  Theory.} 1973\string;19(1)\string:73--77.
+Cover TM. Enumerative source encoding. {\it IEEE Trans Inf Theory.}
+  1973\string;19(1)\string:73--77.
 \newblock \href {\doibase 10.1109/TIT.1973.1054929} {doi:
   10.1109/TIT.1973.1054929}
 
-\bibitem{pagh2001}
-Pagh R. Low redundancy in static dictionaries with constant query time. {\it
-  SIAM Journal on Computing.} 2001\string;31(2)\string:353--363.
-\newblock \href {\doibase 10.1137/S0097539700369909} {doi:
-  10.1137/S0097539700369909}
-
-\bibitem{dietzfelbinger2008}
-Dietzfelbinger M, Pagh R. Succinct data structures for retrieval and
-  approximate membership. In: Automata, Languages and Programming (ICALP 2008).
-  Springer 2008\string:385--396.
-
 \bibitem{chen2007}
 Chen S, Ailamaki A, Gibbons PB, Mowry TC. Improving hash join performance
-  through prefetching. {\it ACM Transactions on Database Systems.}
+  through prefetching. {\it ACM Trans Database Syst.}
   2007\string;32(3)\string:17.
 \newblock \href {\doibase 10.1145/1272743.1272747} {doi:
   10.1145/1272743.1272747}
 
 \bibitem{bungartz2004}
-Bungartz HJ, Griebel M. Sparse grids. {\it Acta Numerica.}
+Bungartz HJ, Griebel M. Sparse grids. {\it Acta Numer.}
   2004\string;13\string:147--269.
 \newblock \href {\doibase 10.1017/S0962492904000182} {doi:
   10.1017/S0962492904000182}
@@ -149,14 +149,13 @@ Novak E, Wo{\'z}niakowski H. {\it Tractability of Multivariate Problems, Volume
 \newblock European Mathematical Society, 2008.
 
 \bibitem{griebel2000}
-Griebel M, Knapek S. Optimized tensor-product approximation spaces. {\it
-  Constructive Approximation.} 2000\string;16(4)\string:525--540.
+Griebel M, Knapek S. Optimized tensor-product approximation spaces. {\it Constr
+  Approx.} 2000\string;16(4)\string:525--540.
 \newblock \href {\doibase 10.1007/s003650010010} {doi: 10.1007/s003650010010}
 
 \bibitem{huang1963}
 Huang JJY, Schultheiss PM. Block quantization of correlated {G}aussian random
-  variables. {\it IEEE Transactions on Communications Systems.}
-  1963\string;11(3)\string:289--296.
+  variables. {\it IEEE Trans Commun Syst.} 1963\string;11(3)\string:289--296.
 \newblock \href {\doibase 10.1109/TCOM.1963.1088759} {doi:
   10.1109/TCOM.1963.1088759}
 
@@ -165,8 +164,8 @@ Gersho A, Gray RM. {\it Vector Quantization and Signal Compression}.
 \newblock Kluwer, 1992.
 
 \bibitem{artifact2026}
-Maharaj T. Tapered grid: library, benchmark programs, analysis scripts and raw
-  measurement logs. Zenodo, \url{https://doi.org/10.5281/zenodo.21675851};
-  2026.
+Maharaj T. Tapered grid: reference implementation, benchmark code, and raw
+  measurement logs. Version 2.0.1. Zenodo,
+  \url{https://doi.org/10.5281/zenodo.21675851};  2026.
 
 \end{thebibliography}

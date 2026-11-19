@@ -16,8 +16,8 @@ make verify          # C++ unit tests, Listing 1 of the paper, Python reference 
 make check-numbers   # regenerate every number and table from results/ and diff against paper/
 ```
 
-`make verify` needs a C++17 compiler and Python 3 with NumPy; `make check-numbers`
-needs Python 3 only. What `make verify` covers:
+`make verify` needs a C++17 compiler and Python 3; `make check-numbers` needs Python 3
+only. Neither needs NumPy or any other package. What `make verify` covers:
 
 | Check | Where |
 |---|---|
@@ -86,7 +86,7 @@ make figures   # paper/figs/
 | the worked example of Section 4 | | `analysis/taper_example.py` | `results/desktop/taper.json` |
 | the query stream's working set (hottest 32 MiB), Section 6.2 | | `analysis/query_stream.py` (numpy) | `results/query_stream.json` |
 | other users' load on the shared server, Section 5 | | `results/server/other_load_sampler.py` (ran beside the runner, not part of it) | `results/server/other_load.tsv`, `other_load_spans.tsv` |
-| Table 2 and the penalty check of Appendix B | | `src/verify_schedule.py`, `src/verify_penalty.py` | printed |
+| Table 2 and the penalty check of Appendix B | | `src/verify_schedule.py` (Table 2 is the last block it prints), `src/verify_penalty.py` | printed |
 
 Every row of a log records the exact command, the repetition, the load average
 before and after, and the available memory. `results/<machine>/env-*.json` records
@@ -115,6 +115,10 @@ because a machine with too little page cache gives a different experiment.
 The α-entmax rows are not redistributed, because they derive from GPT-2 and
 WikiText-2. `python3 src/dump_entmax_rows.py` regenerates them in about 15 minutes on
 a CPU (needs torch, transformers, datasets) with seed 0, as `data/entmax_u.bin`.
+
+`paper/main.tex` is the manuscript source as of this release. An archive cannot cite its
+own version DOI, so this copy cites the DOI of all versions; the submitted manuscript
+cites the version DOI and is otherwise the same.
 
 ## Citing
 

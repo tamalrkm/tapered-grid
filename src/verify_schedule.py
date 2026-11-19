@@ -1,16 +1,18 @@
 """
-Numerical check of Fable's Task-4 warping-schedule claims before we trust them.
+Numerical check of the taper-mismatch claims of Appendix B of the paper, and the
+source of its Table 2.
 
 Model: influence g_i = r^(i-1); depth i uses n_i grid points, per-coordinate
 worst-case error g_i/(2 n_i); total error budget sum_i g_i/(2 n_i) <= eps.
 Minimize grid size |U| = prod_i n_i.
 
 Checks:
- (1) OPTIMAL (continuous, Thm 4.1): inverse water-filling gives EQUAL per-active-
-     level error e*, n_i = g_i/(2 e*). Verify it beats other feasible schedules.
- (2) Thm 4.4: for a geometric schedule n_i = n1 * s^(i-1) (truncated at n_i>=1),
+ (1) OPTIMAL (continuous): inverse water-filling gives EQUAL per-active-level
+     error e*, n_i = g_i/(2 e*). Verify it beats other feasible schedules.
+ (2) For a geometric schedule n_i = n1 * s^(i-1) (truncated at n_i>=1),
      ln|U_s| / ln|U*| -> rho(s) = max(ln(1/s)/ln(1/r), ln(1/r)/ln(1/s)),
      minimized (=1) at s=r. In particular "halving" (s=1/2) is optimal iff r=1/2.
+ (3) Table 2 of the paper: the same ratio at eps = 1e-3, printed last.
 """
 import math
 
@@ -73,3 +75,11 @@ for r in (0.75, 0.5, 0.25):
         rho_emp = ln_s/ln_opt
         note = "<-- s=r (optimal)" if abs(s-r)<1e-9 else ("<-- halving" if abs(s-0.5)<1e-9 else "")
         print(f"  {s:>6.2f} {ln_s:>10.3f} {rho_emp:>9.3f} {rho_theory(r,s):>9.3f}  {note:<20}")
+
+# Table 2 of the paper: inflation of ln|U| by a mismatched refinement ratio at eps = 1e-3.
+eps = 1e-3
+print(f"\n=== Table 2: ln|U_s| / ln|U*| at eps={eps} ===")
+print(f"  {'r':>5} " + " ".join(f"s={s:<5.2f}" for s in (0.25, 0.5, 0.75)))
+for r in (0.25, 0.5, 0.75):
+    ln_opt = optimal_size(r, eps)[0]
+    print(f"  {r:>5.2f} " + " ".join(f"{geometric_size(r, eps, s) / ln_opt:>7.2f}" for s in (0.25, 0.5, 0.75)))
